@@ -4,13 +4,17 @@ import logging
 from contextlib import closing
 
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from pyrogram.errors import RPCError, FloodWait
 
 
 # ============================================================
-# PURVI GUARDIAN BOT
-# Edited Message Protection Bot
+# KIRTI GUARDIAN BOT [V2]
+# EDITED MESSAGE PROTECTION BOT
 # ============================================================
 
 API_ID = int(os.getenv("API_ID", "0"))
@@ -18,18 +22,44 @@ API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
+# Start image
 START_IMAGE = os.getenv("START_IMAGE", "").strip() or "start.jpg"
+
+# Database
 DB_PATH = os.getenv("DB_PATH", "guardian.db")
 
+# Telegram usernames
+BOT_USERNAME = os.getenv(
+    "BOT_USERNAME",
+    "KirtiGuardianBot"
+).lstrip("@")
+
+OWNER_USERNAME = os.getenv(
+    "OWNER_USERNAME",
+    "Kirti_Updates"
+).lstrip("@")
+
+SUPPORT_USERNAME = os.getenv(
+    "SUPPORT_USERNAME",
+    "Kirti_Updates"
+).lstrip("@")
+
 
 # ============================================================
-# ENV CHECK
+# ENVIRONMENT CHECK
 # ============================================================
 
-if not API_ID or not API_HASH or not BOT_TOKEN or not OWNER_ID:
-    raise RuntimeError(
-        "Set API_ID, API_HASH, BOT_TOKEN and OWNER_ID environment variables."
-    )
+if not API_ID:
+    raise RuntimeError("API_ID is missing.")
+
+if not API_HASH:
+    raise RuntimeError("API_HASH is missing.")
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is missing.")
+
+if not OWNER_ID:
+    raise RuntimeError("OWNER_ID is missing.")
 
 
 # ============================================================
@@ -41,7 +71,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
 
-log = logging.getLogger("PurviGuardianBot")
+log = logging.getLogger("KirtiGuardianBot")
 
 
 # ============================================================
@@ -49,7 +79,7 @@ log = logging.getLogger("PurviGuardianBot")
 # ============================================================
 
 app = Client(
-    "purvi_guardian_bot",
+    "kirti_guardian_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
@@ -62,12 +92,20 @@ app = Client(
 # ============================================================
 
 def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=30
+    )
+
+    conn.execute(
+        "PRAGMA journal_mode=WAL"
+    )
+
     return conn
 
 
 def init_db():
+
     with closing(db()) as con:
 
         con.execute("""
@@ -101,16 +139,34 @@ def init_db():
         con.commit()
 
 
+# ============================================================
+# STATS DATABASE
+# ============================================================
+
 def stat_inc(key, amount=1):
+
     with closing(db()) as con:
+
         con.execute("""
             INSERT INTO stats(key, value)
             VALUES(?, ?)
+
             ON CONFLICT(key)
-            DO UPDATE SET value=value+excluded.value
+            DO UPDATE SET value = value + excluded.value
         """, (key, amount))
 
         con.commit()
+
+
+def get_stats():
+
+    with closing(db()) as con:
+
+        rows = con.execute(
+            "SELECT key, value FROM stats"
+        ).fetchall()
+
+    return dict(rows)
 
 
 # ============================================================
@@ -118,9 +174,15 @@ def stat_inc(key, amount=1):
 # ============================================================
 
 def get_setting(chat_id):
+
     with closing(db()) as con:
+
         row = con.execute(
-            "SELECT admin_edit FROM settings WHERE chat_id=?",
+            """
+            SELECT admin_edit
+            FROM settings
+            WHERE chat_id=?
+            """,
             (chat_id,)
         ).fetchone()
 
@@ -128,13 +190,23 @@ def get_setting(chat_id):
 
 
 def set_setting(chat_id, enabled):
+
     with closing(db()) as con:
+
         con.execute("""
-            INSERT INTO settings(chat_id, admin_edit)
+            INSERT INTO settings(
+                chat_id,
+                admin_edit
+            )
             VALUES(?, ?)
+
             ON CONFLICT(chat_id)
-            DO UPDATE SET admin_edit=excluded.admin_edit
-        """, (chat_id, int(enabled)))
+            DO UPDATE SET
+                admin_edit=excluded.admin_edit
+        """, (
+            chat_id,
+            int(enabled)
+        ))
 
         con.commit()
 
@@ -144,40 +216,60 @@ def set_setting(chat_id, enabled):
 # ============================================================
 
 def local_authed(chat_id, user_id):
+
     with closing(db()) as con:
+
         row = con.execute(
             """
             SELECT 1
             FROM local_auth
-            WHERE chat_id=? AND user_id=?
+            WHERE chat_id=?
+            AND user_id=?
             """,
-            (chat_id, user_id)
+            (
+                chat_id,
+                user_id
+            )
         ).fetchone()
 
     return row is not None
 
 
 def add_local(chat_id, user_id):
+
     with closing(db()) as con:
+
         con.execute(
             """
-            INSERT OR IGNORE INTO local_auth(chat_id, user_id)
+            INSERT OR IGNORE INTO local_auth(
+                chat_id,
+                user_id
+            )
             VALUES(?, ?)
             """,
-            (chat_id, user_id)
+            (
+                chat_id,
+                user_id
+            )
         )
 
         con.commit()
 
 
 def remove_local(chat_id, user_id):
+
     with closing(db()) as con:
+
         cur = con.execute(
             """
             DELETE FROM local_auth
-            WHERE chat_id=? AND user_id=?
+            WHERE chat_id=?
+            AND user_id=?
             """,
-            (chat_id, user_id)
+            (
+                chat_id,
+                user_id
+            )
         )
 
         con.commit()
@@ -186,9 +278,14 @@ def remove_local(chat_id, user_id):
 
 
 def clear_local(chat_id):
+
     with closing(db()) as con:
+
         cur = con.execute(
-            "DELETE FROM local_auth WHERE chat_id=?",
+            """
+            DELETE FROM local_auth
+            WHERE chat_id=?
+            """,
             (chat_id,)
         )
 
@@ -198,7 +295,9 @@ def clear_local(chat_id):
 
 
 def list_local(chat_id):
+
     with closing(db()) as con:
+
         rows = con.execute(
             """
             SELECT user_id
@@ -209,7 +308,10 @@ def list_local(chat_id):
             (chat_id,)
         ).fetchall()
 
-    return [row[0] for row in rows]
+    return [
+        row[0]
+        for row in rows
+    ]
 
 
 # ============================================================
@@ -217,7 +319,9 @@ def list_local(chat_id):
 # ============================================================
 
 def global_authed(user_id):
+
     with closing(db()) as con:
+
         row = con.execute(
             """
             SELECT 1
@@ -231,7 +335,9 @@ def global_authed(user_id):
 
 
 def add_global(user_id):
+
     with closing(db()) as con:
+
         con.execute(
             """
             INSERT OR IGNORE INTO global_auth(user_id)
@@ -244,9 +350,14 @@ def add_global(user_id):
 
 
 def remove_global(user_id):
+
     with closing(db()) as con:
+
         cur = con.execute(
-            "DELETE FROM global_auth WHERE user_id=?",
+            """
+            DELETE FROM global_auth
+            WHERE user_id=?
+            """,
             (user_id,)
         )
 
@@ -256,8 +367,12 @@ def remove_global(user_id):
 
 
 def clear_global():
+
     with closing(db()) as con:
-        cur = con.execute("DELETE FROM global_auth")
+
+        cur = con.execute(
+            "DELETE FROM global_auth"
+        )
 
         con.commit()
 
@@ -265,7 +380,9 @@ def clear_global():
 
 
 def list_global():
+
     with closing(db()) as con:
+
         rows = con.execute(
             """
             SELECT user_id
@@ -274,7 +391,10 @@ def list_global():
             """
         ).fetchall()
 
-    return [row[0] for row in rows]
+    return [
+        row[0]
+        for row in rows
+    ]
 
 
 # ============================================================
@@ -282,27 +402,33 @@ def list_global():
 # ============================================================
 
 def is_group(message):
+
     return bool(
         message.chat
-        and message.chat.type in ("group", "supergroup")
+        and message.chat.type in (
+            "group",
+            "supergroup"
+        )
     )
 
 
 async def is_admin(message, user_id=None):
 
-    user_id = user_id or (
-        message.from_user.id
-        if message.from_user
-        else 0
-    )
+    if not message.from_user and user_id is None:
+        return False
 
+    user_id = user_id or message.from_user.id
+
+    # Bot owner
     if user_id == OWNER_ID:
         return True
 
+    # Only groups
     if not is_group(message):
         return False
 
     try:
+
         member = await app.get_chat_member(
             message.chat.id,
             user_id
@@ -313,19 +439,27 @@ async def is_admin(message, user_id=None):
             "owner"
         )
 
-    except RPCError:
+    except RPCError as e:
+
+        log.warning(
+            "Admin check failed: %s",
+            e
+        )
+
         return False
 
 
+async def admin_only(message):
+
+    return await is_admin(message)
+
+
 async def owner_only(message):
+
     return bool(
         message.from_user
         and message.from_user.id == OWNER_ID
     )
-
-
-async def admin_only(message):
-    return await is_admin(message)
 
 
 # ============================================================
@@ -334,14 +468,18 @@ async def admin_only(message):
 
 def target_user(message):
 
-    # Reply target has priority.
+    # Reply user
     if (
         message.reply_to_message
         and message.reply_to_message.from_user
     ):
+
         return message.reply_to_message.from_user.id
 
-    parts = (message.text or "").split(
+    # Command argument
+    parts = (
+        message.text or ""
+    ).split(
         maxsplit=1
     )
 
@@ -350,9 +488,11 @@ def target_user(message):
 
     raw = parts[1].strip()
 
+    # Numeric ID
     if raw.isdigit():
         return int(raw)
 
+    # Username
     return raw.lstrip("@")
 
 
@@ -363,40 +503,56 @@ async def resolve_user(message):
     if target is None:
         return None
 
+    # Already ID
     if isinstance(target, int):
         return target
 
     try:
-        user = await app.get_users(target)
+
+        user = await app.get_users(
+            target
+        )
+
         return user.id
 
     except RPCError:
+
         return None
 
 
 # ============================================================
-# DELETE HELPER
+# DELETE MESSAGE
 # ============================================================
 
 async def delete_quietly(message):
 
     try:
+
         await message.delete()
 
-        stat_inc("deleted_edits")
+        stat_inc(
+            "deleted_edits"
+        )
 
         return True
 
     except FloodWait as e:
 
-        await app.sleep(e.value)
+        await app.sleep(
+            e.value
+        )
 
-    except RPCError:
-        pass
+    except RPCError as e:
+
+        log.debug(
+            "Delete RPC error: %s",
+            e
+        )
 
     except Exception as e:
+
         log.warning(
-            "Delete failed: %s",
+            "Delete error: %s",
             e
         )
 
@@ -404,105 +560,182 @@ async def delete_quietly(message):
 
 
 # ============================================================
-# HELP
-# ============================================================
-
-HELP_TEXT = """
-📚 <b>PURVI GUARDIAN BOT</b>
-
-<b>👑 LOCAL AUTH — ADMIN ONLY</b>
-
-• <code>/auth</code> — Authorize a user
-• <code>/unauth</code> — Remove authorization
-• <code>/authusers</code> — View authorized users
-• <code>/clearauthusers</code> — Clear all local users
-
-<b>🌐 GLOBAL AUTH — OWNER ONLY</b>
-
-• <code>/gauth</code> — Global authorize
-• <code>/gunauth</code> — Remove global authorization
-• <code>/gusers</code> — View global users
-• <code>/cleargusers</code> — Clear global users
-
-<b>🛡️ EDIT DELETE — ADMIN ONLY</b>
-
-• <code>/adminedit on</code> — Delete admin edits
-• <code>/adminedit off</code> — Ignore admin edits
-
-<b>📊 OTHER</b>
-
-• <code>/start</code> — Bot status
-• <code>/stats</code> — Bot statistics
-• <code>/help</code> — Show help
-• <code>/id</code> — Get your Telegram ID
-
-<b>DEFAULT ADMIN EDIT:</b> 🔴 OFF
-
-⚡ Add me to your group and give me
-<b>Delete Messages</b> permission.
-"""
-
-
-# ============================================================
-# START
+# START TEXT
 # ============================================================
 
 START_TEXT = """
-<b>👋 Hello! I'm Purvi Guardian Bot.</b>
+╭━━━━━━━━━━━━━━━━━━━━━━╮
+      🛡️ <b>𝐊𝐈𝐑𝐓𝐈 𝐆𝐔𝐀𝐑𝐃𝐈𝐀𝐍</b>
+          <i>𝐁𝐎𝐓 [𝐕𝟐]</i>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
 
-🛡️ I protect Telegram groups from edited messages.
+👋 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 — 𝐁𝐀𝐃𝐍𝐀𝐌 !! 🇨🇦</b>
 
-<b>Features:</b>
+🤖 <b>𝐈'𝐌 𝐊𝐈𝐑𝐓𝐈 𝐆𝐔𝐀𝐑𝐃𝐈𝐀𝐍</b>
 
-• 🗑️ Delete edited messages
-• 👑 Local authorization
-• 🌐 Global authorization
-• 🛡️ Admin edit protection
-• 📊 Statistics
-• 🔘 Inline buttons
+🚨 <b>𝐈 𝐂𝐀𝐍 𝐀𝐔𝐓𝐎-𝐃𝐄𝐋𝐄𝐓𝐄</b>
+<b>𝐄𝐃𝐈𝐓𝐄𝐃 𝐌𝐄𝐒𝐒𝐀𝐆𝐄𝐒</b>
+<b>(𝐓𝐄𝐗𝐓 & 𝐌𝐄𝐃𝐈𝐀)</b>
 
-<b>How to use:</b>
+🔔 <b>𝐌𝐄𝐌𝐁𝐄𝐑𝐒 𝐀𝐑𝐄 𝐍𝐎𝐓𝐈𝐅𝐈𝐄𝐃</b>
+<b>𝐖𝐇𝐄𝐍 𝐀 𝐌𝐄𝐒𝐒𝐀𝐆𝐄 𝐈𝐒 𝐑𝐄𝐌𝐎𝐕𝐄𝐃.</b>
 
-1. Add me to your group
-2. Give me Delete Messages permission
-3. Use <code>/help</code>
+👍 <b>𝐓𝐄𝐋𝐄𝐆𝐑𝐀𝐌 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍 𝐄𝐃𝐈𝐓𝐒</b>
+<b>𝐀𝐑𝐄 𝐈𝐆𝐍𝐎𝐑𝐄𝐃.</b>
 
-<b>Made for Telegram groups ❤️</b>
+🛡️ <b>𝐈'𝐋𝐋 𝐊𝐄𝐄𝐏 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏</b>
+<b>𝐂𝐋𝐄𝐀𝐍 & 𝐒𝐀𝐅𝐄.</b>
+
+⭐ <b>𝐀𝐃𝐃 𝐌𝐄 𝐓𝐎 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏</b>
+<b>𝐀𝐍𝐃 𝐆𝐈𝐕𝐄 𝐌𝐄 𝐃𝐄𝐋𝐄𝐓𝐄 𝐌𝐄𝐒𝐒𝐀𝐆𝐄𝐒</b>
+<b>𝐏𝐄𝐑𝐌𝐈𝐒𝐒𝐈𝐎𝐍.</b>
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+💎 <b>𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐊𝐈𝐑𝐓𝐈 𝐁𝐎𝐓𝐒</b>
+❤️ <i>𝐌𝐀𝐃𝐄 𝐅𝐎𝐑 𝐓𝐄𝐋𝐄𝐆𝐑𝐀𝐌</i>
 """
 
+
+# ============================================================
+# HELP TEXT
+# ============================================================
+
+HELP_TEXT = """
+╭━━━━━━━━━━━━━━━━━━━━━━╮
+      📚 <b>𝐇𝐄𝐋𝐏 & 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒</b>
+╰━━━━━━━━━━━━━━━━━━━━━━╯
+
+👑 <b>𝐋𝐎𝐂𝐀𝐋 𝐀𝐔𝐓𝐇</b>
+<i>𝐆𝐫𝐨𝐮𝐩 𝐎𝐰𝐧𝐞𝐫 / 𝐀𝐝𝐦𝐢𝐧 𝐎𝐧𝐥𝐲</i>
+
+➤ <code>/auth</code> — 𝐀𝐮𝐭𝐡𝐨𝐫𝐢𝐳𝐞 𝐔𝐬𝐞𝐫
+➤ <code>/unauth</code> — 𝐑𝐞𝐦𝐨𝐯𝐞 𝐀𝐮𝐭𝐡
+➤ <code>/authusers</code> — 𝐀𝐮𝐭𝐡 𝐔𝐬𝐞𝐫𝐬
+➤ <code>/clearauthusers</code> — 𝐂𝐥𝐞𝐚𝐫 𝐀𝐥𝐥
+
+🌐 <b>𝐆𝐋𝐎𝐁𝐀𝐋 𝐀𝐔𝐓𝐇</b>
+<i>𝐁𝐨𝐭 𝐎𝐰𝐧𝐞𝐫 𝐎𝐧𝐥𝐲</i>
+
+➤ <code>/gauth</code> — 𝐆𝐥𝐨𝐛𝐚𝐥 𝐀𝐮𝐭𝐡
+➤ <code>/gunauth</code> — 𝐑𝐞𝐦𝐨𝐯𝐞 𝐆𝐥𝐨𝐛𝐚𝐥
+➤ <code>/gusers</code> — 𝐆𝐥𝐨𝐛𝐚𝐥 𝐔𝐬𝐞𝐫𝐬
+➤ <code>/cleargusers</code> — 𝐂𝐥𝐞𝐚𝐫 𝐀𝐥𝐥
+
+🛡️ <b>𝐄𝐃𝐈𝐓 𝐏𝐑𝐎𝐓𝐄𝐂𝐓𝐈𝐎𝐍</b>
+
+➤ <code>/adminedit on</code>
+   𝐄𝐧𝐚𝐛𝐥𝐞 𝐀𝐝𝐦𝐢𝐧 𝐄𝐝𝐢𝐭 𝐃𝐞𝐥𝐞𝐭𝐢𝐨𝐧
+
+➤ <code>/adminedit off</code>
+   𝐃𝐢𝐬𝐚𝐛𝐥𝐞 𝐀𝐝𝐦𝐢𝐧 𝐄𝐝𝐢𝐭 𝐃𝐞𝐥𝐞𝐭𝐢𝐨𝐧
+
+📊 <b>𝐎𝐓𝐇𝐄𝐑</b>
+
+➤ <code>/start</code> — 𝐒𝐭𝐚𝐫𝐭
+➤ <code>/stats</code> — 𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬
+➤ <code>/id</code> — 𝐓𝐞𝐥𝐞𝐠𝐫𝐚𝐦 𝐈𝐃
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+⚡ <b>𝐆𝐈𝐕𝐄 𝐌𝐄 𝐃𝐄𝐋𝐄𝐓𝐄 𝐌𝐄𝐒𝐒𝐀𝐆𝐄𝐒</b>
+<b>𝐏𝐄𝐑𝐌𝐈𝐒𝐒𝐈𝐎𝐍 𝐓𝐎 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏.</b>
+"""
+
+
+# ============================================================
+# START BUTTONS
+# ============================================================
+
+def start_buttons():
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✚ 𝐀𝐃𝐃 𝐌𝐄 𝐈𝐍 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏 ✚",
+                    url=(
+                        f"https://t.me/"
+                        f"{BOT_USERNAME}"
+                        f"?startgroup=true"
+                    )
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "💬 𝐎𝐖𝐍𝐄𝐑",
+                    url=(
+                        f"https://t.me/"
+                        f"{OWNER_USERNAME}"
+                    )
+                ),
+                InlineKeyboardButton(
+                    "👨‍💼 𝐒𝐔𝐏𝐏𝐎𝐑𝐓",
+                    url=(
+                        f"https://t.me/"
+                        f"{SUPPORT_USERNAME}"
+                    )
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📚 𝐇𝐄𝐋𝐏 & 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒",
+                    callback_data="help"
+                )
+            ]
+        ]
+    )
+
+
+# ============================================================
+# HOME BUTTONS
+# ============================================================
+
+def home_buttons():
+
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📚 𝐇𝐄𝐋𝐏",
+                    callback_data="help"
+                ),
+                InlineKeyboardButton(
+                    "🛡️ 𝐒𝐓𝐀𝐓𝐔𝐒",
+                    callback_data="status"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "✚ 𝐀𝐃𝐃 𝐌𝐄 𝐈𝐍 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏 ✚",
+                    url=(
+                        f"https://t.me/"
+                        f"{BOT_USERNAME}"
+                        f"?startgroup=true"
+                    )
+                )
+            ]
+        ]
+    )
+
+
+# ============================================================
+# START COMMAND
+# ============================================================
 
 @app.on_message(filters.command("start"))
 async def start_cmd(_, message: Message):
 
     stat_inc("starts")
 
-    buttons = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "📚 Help",
-                    callback_data="help"
-                ),
-                InlineKeyboardButton(
-                    "🛡️ Status",
-                    callback_data="status"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "➕ Add Me To Group",
-                    url="https://t.me/PurviGuardianBot?startgroup=true"
-                )
-            ]
-        ]
-    )
+    buttons = start_buttons()
 
     if START_IMAGE:
 
         try:
 
             await message.reply_photo(
-                START_IMAGE,
+                photo=START_IMAGE,
                 caption=START_TEXT,
                 reply_markup=buttons
             )
@@ -512,7 +745,7 @@ async def start_cmd(_, message: Message):
         except Exception as e:
 
             log.warning(
-                "START_IMAGE failed: %s",
+                "Start image failed: %s",
                 e
             )
 
@@ -529,8 +762,24 @@ async def start_cmd(_, message: Message):
 @app.on_message(filters.command("help"))
 async def help_cmd(_, message: Message):
 
+    buttons = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🏠 𝐇𝐎𝐌𝐄",
+                    callback_data="home"
+                ),
+                InlineKeyboardButton(
+                    "🛡️ 𝐒𝐓𝐀𝐓𝐔𝐒",
+                    callback_data="status"
+                )
+            ]
+        ]
+    )
+
     await message.reply_text(
         HELP_TEXT,
+        reply_markup=buttons,
         disable_web_page_preview=True
     )
 
@@ -544,40 +793,94 @@ async def callbacks(_, query):
 
     try:
 
+        # ----------------------------------------------------
+        # HELP
+        # ----------------------------------------------------
+
         if query.data == "help":
 
             buttons = InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton(
-                            "🏠 Home",
+                            "🏠 𝐇𝐎𝐌𝐄",
                             callback_data="home"
                         ),
                         InlineKeyboardButton(
-                            "🛡️ Status",
+                            "🛡️ 𝐒𝐓𝐀𝐓𝐔𝐒",
                             callback_data="status"
                         )
                     ]
                 ]
             )
 
-            await query.message.edit_text(
-                HELP_TEXT,
-                reply_markup=buttons
-            )
+            # Start message is photo message
+            if query.message.photo:
 
-        elif query.data == "status":
+                await query.message.edit_caption(
+                    caption=HELP_TEXT,
+                    reply_markup=buttons
+                )
+
+            else:
+
+                await query.message.edit_text(
+                    HELP_TEXT,
+                    reply_markup=buttons
+                )
+
+            await query.answer()
+
+            return
+
+        # ----------------------------------------------------
+        # HOME
+        # ----------------------------------------------------
+
+        if query.data == "home":
+
+            buttons = start_buttons()
+
+            if query.message.photo:
+
+                await query.message.edit_caption(
+                    caption=START_TEXT,
+                    reply_markup=buttons
+                )
+
+            else:
+
+                await query.message.edit_text(
+                    START_TEXT,
+                    reply_markup=buttons
+                )
+
+            await query.answer()
+
+            return
+
+        # ----------------------------------------------------
+        # STATUS
+        # ----------------------------------------------------
+
+        if query.data == "status":
 
             text = (
-                "<b>🛡️ PURVI GUARDIAN STATUS</b>\n\n"
-                "🟢 Bot: Online\n"
-                f"👑 Owner ID: <code>{OWNER_ID}</code>\n"
+                "╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
+                "      🛡️ <b>𝐁𝐎𝐓 𝐒𝐓𝐀𝐓𝐔𝐒</b>\n"
+                "╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+                "🟢 <b>𝐁𝐎𝐓:</b> 𝐎𝐍𝐋𝐈𝐍𝐄\n"
+                f"👑 <b>𝐎𝐖𝐍𝐄𝐑 𝐈𝐃:</b> "
+                f"<code>{OWNER_ID}</code>\n"
             )
 
             if (
                 query.message.chat
                 and query.message.chat.type
-                in ("group", "supergroup")
+                in (
+                    "group",
+                    "supergroup"
+                )
             ):
 
                 enabled = get_setting(
@@ -585,62 +888,51 @@ async def callbacks(_, query):
                 )
 
                 text += (
-                    "🛡️ Admin Edit Delete: "
+                    "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓:</b> "
                     f"<b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
+                )
+
+            else:
+
+                text += (
+                    "🛡️ <b>𝐄𝐃𝐈𝐓 𝐃𝐄𝐋𝐄𝐓𝐄:</b> "
+                    "<b>𝐑𝐄𝐀𝐃𝐘</b>"
                 )
 
             buttons = InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton(
-                            "📚 Help",
-                            callback_data="help"
-                        ),
-                        InlineKeyboardButton(
-                            "🏠 Home",
+                            "🏠 𝐇𝐎𝐌𝐄",
                             callback_data="home"
-                        )
-                    ]
-                ]
-            )
-
-            await query.message.edit_text(
-                text,
-                reply_markup=buttons
-            )
-
-        elif query.data == "home":
-
-            buttons = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "📚 Help",
-                            callback_data="help"
                         ),
                         InlineKeyboardButton(
-                            "🛡️ Status",
-                            callback_data="status"
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            "➕ Add Me To Group",
-                            url="https://t.me/PurviGuardianBot?startgroup=true"
+                            "📚 𝐇𝐄𝐋𝐏",
+                            callback_data="help"
                         )
                     ]
                 ]
             )
 
-            await query.message.edit_text(
-                START_TEXT,
-                reply_markup=buttons
-            )
+            if query.message.photo:
+
+                await query.message.edit_caption(
+                    caption=text,
+                    reply_markup=buttons
+                )
+
+            else:
+
+                await query.message.edit_text(
+                    text,
+                    reply_markup=buttons
+                )
+
+            await query.answer()
+
+            return
 
         await query.answer()
-
-    except RPCError:
-        pass
 
     except Exception as e:
 
@@ -648,6 +940,13 @@ async def callbacks(_, query):
             "Callback error: %s",
             e
         )
+
+        try:
+            await query.answer(
+                "Something went wrong."
+            )
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -660,7 +959,7 @@ async def auth_cmd(_, message: Message):
     if not await admin_only(message):
 
         return await message.reply_text(
-            "❌ <b>Admin only.</b>"
+            "❌ <b>Admin / Owner Only.</b>"
         )
 
     if not is_group(message):
@@ -674,8 +973,8 @@ async def auth_cmd(_, message: Message):
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use "
-            "<code>/auth USER_ID</code>."
+            "❌ Reply to a user or use:\n"
+            "<code>/auth USER_ID</code>"
         )
 
     add_local(
@@ -684,13 +983,16 @@ async def auth_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        f"✅ User <code>{uid}</code> "
-        "authorized in this chat."
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "      👑 <b>𝐋𝐎𝐂𝐀𝐋 𝐀𝐔𝐓𝐇</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"✅ User <code>{uid}</code>\n"
+        "has been authorized."
     )
 
 
 # ============================================================
-# UNAUTH
+# LOCAL UNAUTH
 # ============================================================
 
 @app.on_message(filters.command("unauth"))
@@ -699,7 +1001,7 @@ async def unauth_cmd(_, message: Message):
     if not await admin_only(message):
 
         return await message.reply_text(
-            "❌ <b>Admin only.</b>"
+            "❌ <b>Admin / Owner Only.</b>"
         )
 
     if not is_group(message):
@@ -713,8 +1015,8 @@ async def unauth_cmd(_, message: Message):
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use "
-            "<code>/unauth USER_ID</code>."
+            "❌ Reply to a user or use:\n"
+            "<code>/unauth USER_ID</code>"
         )
 
     removed = remove_local(
@@ -725,15 +1027,15 @@ async def unauth_cmd(_, message: Message):
     if removed:
 
         text = (
-            f"✅ Removed local authorization: "
-            f"<code>{uid}</code>"
+            f"✅ User <code>{uid}</code>\n"
+            "local authorization removed."
         )
 
     else:
 
         text = (
-            f"ℹ️ User was not authorized: "
-            f"<code>{uid}</code>"
+            f"ℹ️ User <code>{uid}</code>\n"
+            "was not locally authorized."
         )
 
     await message.reply_text(text)
@@ -749,7 +1051,7 @@ async def authusers_cmd(_, message: Message):
     if not await admin_only(message):
 
         return await message.reply_text(
-            "❌ <b>Admin only.</b>"
+            "❌ <b>Admin / Owner Only.</b>"
         )
 
     if not is_group(message):
@@ -765,15 +1067,18 @@ async def authusers_cmd(_, message: Message):
     if not users:
 
         return await message.reply_text(
-            "📭 No local authorized users."
+            "📭 <b>No local authorized users.</b>"
         )
 
     text = (
-        "👑 <b>LOCAL AUTH USERS</b>\n\n"
-        + "\n".join(
-            f"• <code>{uid}</code>"
-            for uid in users
-        )
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "      👑 <b>𝐋𝐎𝐂𝐀𝐋 𝐀𝐔𝐓𝐇</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+    )
+
+    text += "\n".join(
+        f"➤ <code>{uid}</code>"
+        for uid in users
     )
 
     await message.reply_text(text)
@@ -789,7 +1094,7 @@ async def clearauthusers_cmd(_, message: Message):
     if not await admin_only(message):
 
         return await message.reply_text(
-            "❌ <b>Admin only.</b>"
+            "❌ <b>Admin / Owner Only.</b>"
         )
 
     if not is_group(message):
@@ -804,7 +1109,7 @@ async def clearauthusers_cmd(_, message: Message):
 
     await message.reply_text(
         f"🧹 Cleared <b>{count}</b> "
-        "local auth user(s)."
+        "local authorized user(s)."
     )
 
 
@@ -818,7 +1123,7 @@ async def gauth_cmd(_, message: Message):
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Owner only.</b>"
+            "❌ <b>Bot Owner Only.</b>"
         )
 
     uid = await resolve_user(message)
@@ -826,15 +1131,15 @@ async def gauth_cmd(_, message: Message):
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use "
-            "<code>/gauth USER_ID</code>."
+            "❌ Reply to a user or use:\n"
+            "<code>/gauth USER_ID</code>"
         )
 
     add_global(uid)
 
     await message.reply_text(
-        f"🌐 Global authorization added: "
-        f"<code>{uid}</code>"
+        f"🌐 User <code>{uid}</code>\n"
+        "has been globally authorized."
     )
 
 
@@ -848,7 +1153,7 @@ async def gunauth_cmd(_, message: Message):
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Owner only.</b>"
+            "❌ <b>Bot Owner Only.</b>"
         )
 
     uid = await resolve_user(message)
@@ -856,24 +1161,26 @@ async def gunauth_cmd(_, message: Message):
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use "
-            "<code>/gunauth USER_ID</code>."
+            "❌ Reply to a user or use:\n"
+            "<code>/gunauth USER_ID</code>"
         )
 
-    removed = remove_global(uid)
+    removed = remove_global(
+        uid
+    )
 
     if removed:
 
         text = (
-            f"✅ Removed global authorization: "
-            f"<code>{uid}</code>"
+            f"✅ Global authorization removed "
+            f"from <code>{uid}</code>."
         )
 
     else:
 
         text = (
-            f"ℹ️ User was not globally authorized: "
-            f"<code>{uid}</code>"
+            f"ℹ️ User <code>{uid}</code> "
+            "was not globally authorized."
         )
 
     await message.reply_text(text)
@@ -889,7 +1196,7 @@ async def gusers_cmd(_, message: Message):
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Owner only.</b>"
+            "❌ <b>Bot Owner Only.</b>"
         )
 
     users = list_global()
@@ -897,15 +1204,18 @@ async def gusers_cmd(_, message: Message):
     if not users:
 
         return await message.reply_text(
-            "📭 No global authorized users."
+            "📭 <b>No global authorized users.</b>"
         )
 
     text = (
-        "🌐 <b>GLOBAL AUTH USERS</b>\n\n"
-        + "\n".join(
-            f"• <code>{uid}</code>"
-            for uid in users
-        )
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "      🌐 <b>𝐆𝐋𝐎𝐁𝐀𝐋 𝐀𝐔𝐓𝐇</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+    )
+
+    text += "\n".join(
+        f"➤ <code>{uid}</code>"
+        for uid in users
     )
 
     await message.reply_text(text)
@@ -921,19 +1231,19 @@ async def cleargusers_cmd(_, message: Message):
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Owner only.</b>"
+            "❌ <b>Bot Owner Only.</b>"
         )
 
     count = clear_global()
 
     await message.reply_text(
         f"🧹 Cleared <b>{count}</b> "
-        "global auth user(s)."
+        "global authorized user(s)."
     )
 
 
 # ============================================================
-# ADMIN EDIT SETTING
+# ADMIN EDIT
 # ============================================================
 
 @app.on_message(filters.command("adminedit"))
@@ -942,7 +1252,7 @@ async def adminedit_cmd(_, message: Message):
     if not await admin_only(message):
 
         return await message.reply_text(
-            "❌ <b>Admin only.</b>"
+            "❌ <b>Admin / Owner Only.</b>"
         )
 
     if not is_group(message):
@@ -951,29 +1261,36 @@ async def adminedit_cmd(_, message: Message):
             "❌ This command works only in groups."
         )
 
-    parts = (message.text or "").split()
+    parts = (
+        message.text or ""
+    ).split()
 
     if (
         len(parts) < 2
-        or parts[1].lower() not in ("on", "off")
+        or parts[1].lower()
+        not in (
+            "on",
+            "off"
+        )
     ):
 
         current = (
-            "ON"
+            "🟢 ON"
             if get_setting(message.chat.id)
-            else "OFF"
+            else "🔴 OFF"
         )
 
         return await message.reply_text(
-            f"🛡️ Admin Edit Delete: "
-            f"<b>{current}</b>\n\n"
+            "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓 𝐃𝐄𝐋𝐄𝐓𝐄</b>\n\n"
+            f"Current: <b>{current}</b>\n\n"
             "Use:\n"
             "<code>/adminedit on</code>\n"
             "<code>/adminedit off</code>"
         )
 
     enabled = (
-        parts[1].lower() == "on"
+        parts[1].lower()
+        == "on"
     )
 
     set_setting(
@@ -982,8 +1299,8 @@ async def adminedit_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        "🛡️ Admin Edit Delete: "
-        f"<b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
+        "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓 𝐃𝐄𝐋𝐄𝐓𝐄</b>\n\n"
+        f"Status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
     )
 
 
@@ -992,10 +1309,12 @@ async def adminedit_cmd(_, message: Message):
 # ============================================================
 #
 # IMPORTANT:
-# Pyrogram has filters.group.
 # filters.supergroup DOES NOT EXIST.
 #
-# filters.group handles both groups and supergroups.
+# filters.group handles:
+#   • Normal Groups
+#   • Supergroups
+#
 # ============================================================
 
 @app.on_edited_message(filters.group)
@@ -1006,22 +1325,12 @@ async def edited_guard(_, message: Message):
 
     uid = message.from_user.id
 
-    # --------------------------------------------------------
-    # Ignore bot's own edited messages
-    # --------------------------------------------------------
-
-    try:
-
-        me = await app.get_me()
-
-        if uid == me.id:
-            return
-
-    except RPCError:
-        pass
+    # Ignore bot messages
+    if message.from_user.is_bot:
+        return
 
     # --------------------------------------------------------
-    # Authorized users are always exempt
+    # LOCAL AUTH
     # --------------------------------------------------------
 
     if local_authed(
@@ -1030,11 +1339,15 @@ async def edited_guard(_, message: Message):
     ):
         return
 
+    # --------------------------------------------------------
+    # GLOBAL AUTH
+    # --------------------------------------------------------
+
     if global_authed(uid):
         return
 
     # --------------------------------------------------------
-    # Check Telegram member status
+    # GET MEMBER STATUS
     # --------------------------------------------------------
 
     try:
@@ -1046,7 +1359,12 @@ async def edited_guard(_, message: Message):
 
         status = member.status
 
-    except RPCError:
+    except RPCError as e:
+
+        log.debug(
+            "Member check failed: %s",
+            e
+        )
 
         status = None
 
@@ -1065,15 +1383,19 @@ async def edited_guard(_, message: Message):
         ):
             return
 
-        await delete_quietly(message)
+        await delete_quietly(
+            message
+        )
 
         return
 
     # --------------------------------------------------------
-    # NORMAL MEMBERS
+    # NORMAL MEMBER
     # --------------------------------------------------------
 
-    await delete_quietly(message)
+    await delete_quietly(
+        message
+    )
 
 
 # ============================================================
@@ -1089,16 +1411,10 @@ async def stats_cmd(_, message: Message):
     ):
 
         return await message.reply_text(
-            "❌ <b>Admin/Owner only.</b>"
+            "❌ <b>Admin / Owner Only.</b>"
         )
 
-    with closing(db()) as con:
-
-        rows = dict(
-            con.execute(
-                "SELECT key,value FROM stats"
-            ).fetchall()
-        )
+    rows = get_stats()
 
     starts = rows.get(
         "starts",
@@ -1111,9 +1427,13 @@ async def stats_cmd(_, message: Message):
     )
 
     text = (
-        "<b>📊 PURVI GUARDIAN STATISTICS</b>\n\n"
-        f"▶️ Starts: <code>{starts}</code>\n"
-        f"🗑️ Deleted edits: <code>{deleted}</code>\n"
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "      📊 <b>𝐊𝐈𝐑𝐓𝐈 𝐒𝐓𝐀𝐓𝐒</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"▶️ <b>𝐒𝐓𝐀𝐑𝐓𝐒:</b> "
+        f"<code>{starts}</code>\n"
+        f"🗑️ <b>𝐃𝐄𝐋𝐄𝐓𝐄𝐃 𝐄𝐃𝐈𝐓𝐒:</b> "
+        f"<code>{deleted}</code>\n"
     )
 
     if is_group(message):
@@ -1123,7 +1443,7 @@ async def stats_cmd(_, message: Message):
         )
 
         text += (
-            "🛡️ Admin Edit Delete: "
+            "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓:</b> "
             f"<b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
         )
 
@@ -1143,13 +1463,25 @@ async def id_cmd(_, message: Message):
         return
 
     await message.reply_text(
-        f"🆔 Your Telegram ID: "
+        "🆔 <b>𝐘𝐎𝐔𝐑 𝐓𝐄𝐋𝐄𝐆𝐑𝐀𝐌 𝐈𝐃</b>\n\n"
         f"<code>{message.from_user.id}</code>"
     )
 
 
 # ============================================================
-# STARTUP
+# ERROR LOGGER
+# ============================================================
+
+@app.on_disconnect()
+async def disconnected():
+
+    log.warning(
+        "Telegram connection disconnected."
+    )
+
+
+# ============================================================
+# START BOT
 # ============================================================
 
 if __name__ == "__main__":
@@ -1161,11 +1493,11 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "Purvi Guardian Bot starting..."
+        "KIRTI GUARDIAN BOT [V2] STARTING..."
     )
 
     log.info(
-        "Edit protection: ENABLED"
+        "Edited message protection enabled."
     )
 
     log.info(
