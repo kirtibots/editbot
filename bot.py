@@ -1,21 +1,36 @@
+# ============================================================
+# KIRTI GUARDIAN BOT
+# MongoDB + SQLite fallback
+# Broadcast + Edit Guardian + Auth
+# ============================================================
+
 import os
+import re
+import time
+import sqlite3
 import asyncio
 import logging
-import time
+from contextlib import closing
 
-from pymongo import MongoClient
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.types import (
     Message,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
+    InlineKeyboardButton
 )
 from pyrogram.errors import RPCError, FloodWait
 
+# MongoDB is optional
+try:
+    from pymongo import MongoClient
+    PYMongo_AVAILABLE = True
+except ImportError:
+    PYMongo_AVAILABLE = False
+
 
 # ============================================================
-#                    KIRTI GUARDIAN BOT
+# CONFIG
 # ============================================================
 
 API_ID = int(os.getenv("API_ID", "0"))
@@ -23,7 +38,7 @@ API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-MONGO_URI = os.getenv("MONGO_URI", "")
+MONGO_URI = os.getenv("MONGO_URI", "").strip()
 MONGO_DB_NAME = os.getenv(
     "MONGO_DB_NAME",
     "kirti_guardian"
@@ -32,26 +47,31 @@ MONGO_DB_NAME = os.getenv(
 START_IMAGE = os.getenv(
     "START_IMAGE",
     "start.jpg"
-)
+).strip()
 
 BOT_USERNAME = os.getenv(
     "BOT_USERNAME",
     "KirtiGuardianBot"
-).lstrip("@")
+).replace("@", "")
 
 OWNER_USERNAME = os.getenv(
     "OWNER_USERNAME",
     ""
-).lstrip("@")
+).replace("@", "")
 
 SUPPORT_USERNAME = os.getenv(
     "SUPPORT_USERNAME",
     ""
-).lstrip("@")
+).replace("@", "")
+
+SQLITE_DB = os.getenv(
+    "SQLITE_DB",
+    "kirti_guardian.db"
+)
 
 
 # ============================================================
-#                       CHECK CONFIG
+# BASIC CHECK
 # ============================================================
 
 if not API_ID:
@@ -66,12 +86,9 @@ if not BOT_TOKEN:
 if not OWNER_ID:
     raise RuntimeError("OWNER_ID is missing.")
 
-if not MONGO_URI:
-    raise RuntimeError("MONGO_URI is missing.")
-
 
 # ============================================================
-#                         LOGGING
+# LOGGING
 # ============================================================
 
 logging.basicConfig(
@@ -83,7 +100,7 @@ log = logging.getLogger("KirtiGuardian")
 
 
 # ============================================================
-#                        PYROGRAM
+# PYROGRAM
 # ============================================================
 
 app = Client(
@@ -96,86 +113,260 @@ app = Client(
 
 
 # ============================================================
-#                         MONGODB
+# DATABASE MODE
 # ============================================================
 
-mongo = MongoClient(
-    MONGO_URI,
-    serverSelectionTimeoutMS=10000
-)
+USE_MONGO = False
 
-mongo.admin.command("ping")
+mongo = None
+mongo_db = None
 
-db = mongo[MONGO_DB_NAME]
-
-users_col = db["users"]
-local_auth_col = db["local_auth"]
-global_auth_col = db["global_auth"]
-settings_col = db["settings"]
-stats_col = db["stats"]
+users_col = None
+local_auth_col = None
+global_auth_col = None
+settings_col = None
+stats_col = None
 
 
 # ============================================================
-#                          INDEXES
+# SQLITE
 # ============================================================
 
-users_col.create_index(
-    "user_id",
-    unique=True
-)
+def sqlite_conn():
 
-local_auth_col.create_index(
-    [
-        ("chat_id", 1),
-        ("user_id", 1)
-    ],
-    unique=True
-)
-
-global_auth_col.create_index(
-    "user_id",
-    unique=True
-)
-
-settings_col.create_index(
-    "chat_id",
-    unique=True
-)
-
-
-# ============================================================
-#                         STATISTICS
-# ============================================================
-
-def stat_inc(key, amount=1):
-
-    stats_col.update_one(
-        {"key": key},
-        {
-            "$inc": {
-                "value": amount
-            }
-        },
-        upsert=True
+    con = sqlite3.connect(
+        SQLITE_DB,
+        timeout=30
     )
+
+    con.execute(
+        "PRAGMA journal_mode=WAL"
+    )
+
+    return con
+
+
+def init_sqlite():
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                is_bot INTEGER DEFAULT 0,
+                updated_at REAL
+            )
+        """)
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS local_auth (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY(chat_id, user_id)
+            )
+        """)
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS global_auth (
+                user_id INTEGER PRIMARY KEY
+            )
+        """)
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                chat_id INTEGER PRIMARY KEY,
+                admin_edit INTEGER DEFAULT 0
+            )
+        """)
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS stats (
+                key TEXT PRIMARY KEY,
+                value INTEGER DEFAULT 0
+            )
+        """)
+
+        con.commit()
+
+
+# ============================================================
+# DATABASE START
+# ============================================================
+
+def init_database():
+
+    global USE_MONGO
+    global mongo
+    global mongo_db
+    global users_col
+    global local_auth_col
+    global global_auth_col
+    global settings_col
+    global stats_col
+
+    init_sqlite()
+
+    if not MONGO_URI:
+
+        log.warning(
+            "MONGO_URI not set - using SQLite fallback."
+        )
+
+        return
+
+    if not PYMongo_AVAILABLE:
+
+        log.warning(
+            "pymongo not installed - using SQLite fallback."
+        )
+
+        return
+
+    try:
+
+        mongo = MongoClient(
+            MONGO_URI,
+            serverSelectionTimeoutMS=5000
+        )
+
+        mongo.admin.command("ping")
+
+        mongo_db = mongo[
+            MONGO_DB_NAME
+        ]
+
+        users_col = mongo_db["users"]
+        local_auth_col = mongo_db["local_auth"]
+        global_auth_col = mongo_db["global_auth"]
+        settings_col = mongo_db["settings"]
+        stats_col = mongo_db["stats"]
+
+        users_col.create_index(
+            "user_id",
+            unique=True
+        )
+
+        local_auth_col.create_index(
+            [
+                ("chat_id", 1),
+                ("user_id", 1)
+            ],
+            unique=True
+        )
+
+        global_auth_col.create_index(
+            "user_id",
+            unique=True
+        )
+
+        settings_col.create_index(
+            "chat_id",
+            unique=True
+        )
+
+        USE_MONGO = True
+
+        log.info(
+            "MongoDB connected successfully."
+        )
+
+    except Exception as e:
+
+        USE_MONGO = False
+
+        log.warning(
+            "MongoDB unavailable: %s",
+            e
+        )
+
+        log.warning(
+            "Using SQLite fallback."
+        )
+
+
+# ============================================================
+# STATS
+# ============================================================
+
+def stat_inc(
+    key,
+    amount=1
+):
+
+    if USE_MONGO:
+
+        try:
+
+            stats_col.update_one(
+                {"key": key},
+                {
+                    "$inc": {
+                        "value": amount
+                    }
+                },
+                upsert=True
+            )
+
+            return
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute("""
+            INSERT INTO stats(key,value)
+            VALUES(?,?)
+            ON CONFLICT(key)
+            DO UPDATE SET value=value+excluded.value
+        """, (
+            key,
+            amount
+        ))
+
+        con.commit()
 
 
 def get_stat(key):
 
-    data = stats_col.find_one(
-        {"key": key}
-    )
+    if USE_MONGO:
 
-    if not data:
-        return 0
+        try:
+
+            data = stats_col.find_one(
+                {"key": key}
+            )
+
+            return int(
+                data.get("value", 0)
+            ) if data else 0
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        row = con.execute(
+            "SELECT value FROM stats WHERE key=?",
+            (key,)
+        ).fetchone()
 
     return int(
-        data.get("value", 0)
-    )
+        row[0]
+    ) if row else 0
 
 
 # ============================================================
-#                         SAVE USER
+# USERS
 # ============================================================
 
 def save_user(user):
@@ -183,31 +374,63 @@ def save_user(user):
     if not user:
         return
 
-    try:
+    if USE_MONGO:
 
-        users_col.update_one(
-            {
-                "user_id": user.id
-            },
-            {
-                "$set": {
-                    "user_id": user.id,
-                    "username": user.username,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "is_bot": user.is_bot,
-                    "updated_at": time.time()
-                }
-            },
-            upsert=True
-        )
+        try:
 
-    except Exception as e:
+            users_col.update_one(
+                {
+                    "user_id": user.id
+                },
+                {
+                    "$set": {
+                        "user_id": user.id,
+                        "username": user.username,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "is_bot": user.is_bot,
+                        "updated_at": time.time()
+                    }
+                },
+                upsert=True
+            )
 
-        log.warning(
-            "User save error: %s",
-            e
-        )
+            return
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute("""
+            INSERT INTO users(
+                user_id,
+                username,
+                first_name,
+                last_name,
+                is_bot,
+                updated_at
+            )
+            VALUES(?,?,?,?,?,?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET
+                username=excluded.username,
+                first_name=excluded.first_name,
+                last_name=excluded.last_name,
+                is_bot=excluded.is_bot,
+                updated_at=excluded.updated_at
+        """, (
+            user.id,
+            user.username,
+            user.first_name,
+            user.last_name,
+            int(user.is_bot),
+            time.time()
+        ))
+
+        con.commit()
 
 
 def save_message_user(message):
@@ -216,31 +439,125 @@ def save_message_user(message):
         message
         and message.from_user
     ):
+
         save_user(
             message.from_user
         )
 
 
+def user_count():
+
+    if USE_MONGO:
+
+        try:
+
+            return users_col.count_documents(
+                {
+                    "is_bot": {
+                        "$ne": True
+                    }
+                }
+            )
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        row = con.execute(
+            "SELECT COUNT(*) FROM users WHERE is_bot=0"
+        ).fetchone()
+
+    return int(row[0])
+
+
+def all_user_ids():
+
+    if USE_MONGO:
+
+        try:
+
+            return [
+                x["user_id"]
+                for x in users_col.find(
+                    {
+                        "is_bot": {
+                            "$ne": True
+                        }
+                    },
+                    {
+                        "_id": 0,
+                        "user_id": 1
+                    }
+                )
+            ]
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        rows = con.execute(
+            "SELECT user_id FROM users WHERE is_bot=0"
+        ).fetchall()
+
+    return [
+        x[0]
+        for x in rows
+    ]
+
+
+def remove_user(user_id):
+
+    if USE_MONGO:
+
+        try:
+
+            users_col.delete_one(
+                {
+                    "user_id": user_id
+                }
+            )
+
+            return
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute(
+            "DELETE FROM users WHERE user_id=?",
+            (user_id,)
+        )
+
+        con.commit()
+
+
 # ============================================================
-#                         GROUP CHECK
+# GROUP CHECK
 # ============================================================
 
 def is_group(message):
 
-    if not message:
-        return False
-
-    if not message.chat:
-        return False
-
-    return message.chat.type in (
-        ChatType.GROUP,
-        ChatType.SUPERGROUP
+    return bool(
+        message
+        and message.chat
+        and message.chat.type in (
+            ChatType.GROUP,
+            ChatType.SUPERGROUP
+        )
     )
 
 
 # ============================================================
-#                         ADMIN CHECK
+# ADMIN
 # ============================================================
 
 async def is_admin(
@@ -276,17 +593,12 @@ async def is_admin(
             ChatMemberStatus.OWNER
         )
 
-    except RPCError as e:
-
-        log.warning(
-            "Admin check error: %s",
-            e
-        )
+    except RPCError:
 
         return False
 
 
-async def owner_only(message):
+async def is_owner(message):
 
     return bool(
         message.from_user
@@ -295,26 +607,43 @@ async def owner_only(message):
 
 
 # ============================================================
-#                          SETTINGS
+# SETTINGS
 # ============================================================
 
 def get_setting(chat_id):
 
-    data = settings_col.find_one(
-        {
-            "chat_id": chat_id
-        }
-    )
+    if USE_MONGO:
 
-    if not data:
-        return False
+        try:
+
+            data = settings_col.find_one(
+                {
+                    "chat_id": chat_id
+                }
+            )
+
+            return bool(
+                data.get(
+                    "admin_edit",
+                    False
+                )
+            ) if data else False
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        row = con.execute(
+            "SELECT admin_edit FROM settings WHERE chat_id=?",
+            (chat_id,)
+        ).fetchone()
 
     return bool(
-        data.get(
-            "admin_edit",
-            False
-        )
-    )
+        row[0]
+    ) if row else False
 
 
 def set_setting(
@@ -322,22 +651,51 @@ def set_setting(
     enabled
 ):
 
-    settings_col.update_one(
-        {
-            "chat_id": chat_id
-        },
-        {
-            "$set": {
-                "chat_id": chat_id,
-                "admin_edit": bool(enabled)
-            }
-        },
-        upsert=True
-    )
+    if USE_MONGO:
+
+        try:
+
+            settings_col.update_one(
+                {
+                    "chat_id": chat_id
+                },
+                {
+                    "$set": {
+                        "chat_id": chat_id,
+                        "admin_edit": bool(enabled)
+                    }
+                },
+                upsert=True
+            )
+
+            return
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute("""
+            INSERT INTO settings(
+                chat_id,
+                admin_edit
+            )
+            VALUES(?,?)
+            ON CONFLICT(chat_id)
+            DO UPDATE SET
+                admin_edit=excluded.admin_edit
+        """, (
+            chat_id,
+            int(enabled)
+        ))
+
+        con.commit()
 
 
 # ============================================================
-#                         LOCAL AUTH
+# LOCAL AUTH
 # ============================================================
 
 def local_authed(
@@ -345,15 +703,39 @@ def local_authed(
     user_id
 ):
 
-    return (
-        local_auth_col.find_one(
-            {
-                "chat_id": chat_id,
-                "user_id": user_id
-            }
-        )
-        is not None
-    )
+    if USE_MONGO:
+
+        try:
+
+            return (
+                local_auth_col.find_one(
+                    {
+                        "chat_id": chat_id,
+                        "user_id": user_id
+                    }
+                )
+                is not None
+            )
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        row = con.execute(
+            """
+            SELECT 1 FROM local_auth
+            WHERE chat_id=? AND user_id=?
+            """,
+            (
+                chat_id,
+                user_id
+            )
+        ).fetchone()
+
+    return row is not None
 
 
 def add_local(
@@ -361,19 +743,46 @@ def add_local(
     user_id
 ):
 
-    local_auth_col.update_one(
-        {
-            "chat_id": chat_id,
-            "user_id": user_id
-        },
-        {
-            "$set": {
-                "chat_id": chat_id,
-                "user_id": user_id
-            }
-        },
-        upsert=True
-    )
+    if USE_MONGO:
+
+        try:
+
+            local_auth_col.update_one(
+                {
+                    "chat_id": chat_id,
+                    "user_id": user_id
+                },
+                {
+                    "$set": {
+                        "chat_id": chat_id,
+                        "user_id": user_id
+                    }
+                },
+                upsert=True
+            )
+
+            return
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute(
+            """
+            INSERT OR IGNORE INTO local_auth
+            (chat_id,user_id)
+            VALUES(?,?)
+            """,
+            (
+                chat_id,
+                user_id
+            )
+        )
+
+        con.commit()
 
 
 def remove_local(
@@ -381,117 +790,290 @@ def remove_local(
     user_id
 ):
 
-    result = local_auth_col.delete_one(
-        {
-            "chat_id": chat_id,
-            "user_id": user_id
-        }
-    )
+    if USE_MONGO:
 
-    return result.deleted_count
+        try:
+
+            result = local_auth_col.delete_one(
+                {
+                    "chat_id": chat_id,
+                    "user_id": user_id
+                }
+            )
+
+            return result.deleted_count
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        cur = con.execute(
+            """
+            DELETE FROM local_auth
+            WHERE chat_id=? AND user_id=?
+            """,
+            (
+                chat_id,
+                user_id
+            )
+        )
+
+        con.commit()
+
+    return cur.rowcount
 
 
 def clear_local(chat_id):
 
-    result = local_auth_col.delete_many(
-        {
-            "chat_id": chat_id
-        }
-    )
+    if USE_MONGO:
 
-    return result.deleted_count
+        try:
+
+            result = local_auth_col.delete_many(
+                {
+                    "chat_id": chat_id
+                }
+            )
+
+            return result.deleted_count
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        cur = con.execute(
+            "DELETE FROM local_auth WHERE chat_id=?",
+            (chat_id,)
+        )
+
+        con.commit()
+
+    return cur.rowcount
 
 
 def list_local(chat_id):
 
+    if USE_MONGO:
+
+        try:
+
+            return [
+                x["user_id"]
+                for x in local_auth_col.find(
+                    {
+                        "chat_id": chat_id
+                    },
+                    {
+                        "_id": 0,
+                        "user_id": 1
+                    }
+                ).sort(
+                    "user_id",
+                    1
+                )
+            ]
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        rows = con.execute(
+            """
+            SELECT user_id
+            FROM local_auth
+            WHERE chat_id=?
+            ORDER BY user_id
+            """,
+            (chat_id,)
+        ).fetchall()
+
     return [
-        x["user_id"]
-        for x in local_auth_col.find(
-            {
-                "chat_id": chat_id
-            },
-            {
-                "_id": 0,
-                "user_id": 1
-            }
-        ).sort(
-            "user_id",
-            1
-        )
+        x[0]
+        for x in rows
     ]
 
 
 # ============================================================
-#                         GLOBAL AUTH
+# GLOBAL AUTH
 # ============================================================
 
 def global_authed(user_id):
 
-    return (
-        global_auth_col.find_one(
-            {
-                "user_id": user_id
-            }
-        )
-        is not None
-    )
+    if USE_MONGO:
+
+        try:
+
+            return (
+                global_auth_col.find_one(
+                    {
+                        "user_id": user_id
+                    }
+                )
+                is not None
+            )
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        row = con.execute(
+            "SELECT 1 FROM global_auth WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+
+    return row is not None
 
 
 def add_global(user_id):
 
-    global_auth_col.update_one(
-        {
-            "user_id": user_id
-        },
-        {
-            "$set": {
-                "user_id": user_id
-            }
-        },
-        upsert=True
-    )
+    if USE_MONGO:
+
+        try:
+
+            global_auth_col.update_one(
+                {
+                    "user_id": user_id
+                },
+                {
+                    "$set": {
+                        "user_id": user_id
+                    }
+                },
+                upsert=True
+            )
+
+            return
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        con.execute(
+            "INSERT OR IGNORE INTO global_auth(user_id) VALUES(?)",
+            (user_id,)
+        )
+
+        con.commit()
 
 
 def remove_global(user_id):
 
-    result = global_auth_col.delete_one(
-        {
-            "user_id": user_id
-        }
-    )
+    if USE_MONGO:
 
-    return result.deleted_count
+        try:
+
+            result = global_auth_col.delete_one(
+                {
+                    "user_id": user_id
+                }
+            )
+
+            return result.deleted_count
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        cur = con.execute(
+            "DELETE FROM global_auth WHERE user_id=?",
+            (user_id,)
+        )
+
+        con.commit()
+
+    return cur.rowcount
 
 
 def clear_global():
 
-    result = global_auth_col.delete_many({})
+    if USE_MONGO:
 
-    return result.deleted_count
+        try:
+
+            result = global_auth_col.delete_many({})
+
+            return result.deleted_count
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        cur = con.execute(
+            "DELETE FROM global_auth"
+        )
+
+        con.commit()
+
+    return cur.rowcount
 
 
 def list_global():
 
+    if USE_MONGO:
+
+        try:
+
+            return [
+                x["user_id"]
+                for x in global_auth_col.find(
+                    {},
+                    {
+                        "_id": 0,
+                        "user_id": 1
+                    }
+                ).sort(
+                    "user_id",
+                    1
+                )
+            ]
+
+        except Exception:
+            pass
+
+    with closing(
+        sqlite_conn()
+    ) as con:
+
+        rows = con.execute(
+            """
+            SELECT user_id
+            FROM global_auth
+            ORDER BY user_id
+            """
+        ).fetchall()
+
     return [
-        x["user_id"]
-        for x in global_auth_col.find(
-            {},
-            {
-                "_id": 0,
-                "user_id": 1
-            }
-        ).sort(
-            "user_id",
-            1
-        )
+        x[0]
+        for x in rows
     ]
 
 
 # ============================================================
-#                         USER RESOLVER
+# RESOLVE USER
 # ============================================================
 
-def target_user(message):
+def get_target(message):
 
     if (
         message.reply_to_message
@@ -503,13 +1085,15 @@ def target_user(message):
             .id
         )
 
-    parts = (
+    text = (
         message.text or ""
-    ).split(
+    )
+
+    parts = text.split(
         maxsplit=1
     )
 
-    if len(parts) != 2:
+    if len(parts) < 2:
         return None
 
     value = parts[1].strip()
@@ -522,12 +1106,17 @@ def target_user(message):
 
 async def resolve_user(message):
 
-    target = target_user(message)
+    target = get_target(
+        message
+    )
 
     if target is None:
         return None
 
-    if isinstance(target, int):
+    if isinstance(
+        target,
+        int
+    ):
         return target
 
     try:
@@ -544,39 +1133,7 @@ async def resolve_user(message):
 
 
 # ============================================================
-#                       DELETE EDIT
-# ============================================================
-
-async def delete_quietly(message):
-
-    try:
-
-        await message.delete()
-
-        stat_inc(
-            "deleted_edits"
-        )
-
-        return True
-
-    except FloodWait as e:
-
-        await asyncio.sleep(
-            e.value
-        )
-
-    except RPCError as e:
-
-        log.debug(
-            "Delete error: %s",
-            e
-        )
-
-    return False
-
-
-# ============================================================
-#                         START TEXT
+# START
 # ============================================================
 
 def start_text(
@@ -635,7 +1192,7 @@ Mᴇssᴀɢᴇs Pᴇʀᴍɪssɪᴏɴ.</b>
 
 
 # ============================================================
-#                            HELP
+# HELP
 # ============================================================
 
 HELP_TEXT = """
@@ -663,10 +1220,8 @@ HELP_TEXT = """
 <i>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ</i>
 
 ➤ <code>/broadcast MESSAGE</code>
-
-➤ Rᴇᴘʟʏ Tᴏ Aɴʏ Mᴇssᴀɢᴇ:
+➤ Rᴇᴘʟʏ Tᴏ Mᴇssᴀɢᴇ:
 <code>/broadcast</code>
-
 ➤ <code>/broadcast_stats</code>
 
 🛡️ <b>Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>
@@ -689,14 +1244,12 @@ Mᴇssᴀɢᴇs Pᴇʀᴍɪssɪᴏɴ</b>
 
 
 # ============================================================
-#                           BUTTONS
+# BUTTONS
 # ============================================================
 
 def start_buttons():
 
-    buttons = []
-
-    buttons.append(
+    rows = [
         [
             InlineKeyboardButton(
                 "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
@@ -707,13 +1260,13 @@ def start_buttons():
                 )
             )
         ]
-    )
+    ]
 
-    owner_row = []
+    people = []
 
     if OWNER_USERNAME:
 
-        owner_row.append(
+        people.append(
             InlineKeyboardButton(
                 "💬 Oᴡɴᴇʀ",
                 url=(
@@ -725,7 +1278,7 @@ def start_buttons():
 
     if SUPPORT_USERNAME:
 
-        owner_row.append(
+        people.append(
             InlineKeyboardButton(
                 "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
                 url=(
@@ -735,12 +1288,10 @@ def start_buttons():
             )
         )
 
-    if owner_row:
-        buttons.append(
-            owner_row
-        )
+    if people:
+        rows.append(people)
 
-    buttons.append(
+    rows.append(
         [
             InlineKeyboardButton(
                 "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
@@ -750,7 +1301,7 @@ def start_buttons():
     )
 
     return InlineKeyboardMarkup(
-        buttons
+        rows
     )
 
 
@@ -769,7 +1320,7 @@ def home_buttons():
 
 
 # ============================================================
-#                            START
+# START COMMAND
 # ============================================================
 
 @app.on_message(
@@ -798,24 +1349,27 @@ async def start_cmd(
         bot
     )
 
-    try:
+    if (
+        START_IMAGE
+        and os.path.exists(START_IMAGE)
+    ):
 
-        if START_IMAGE:
+        try:
 
             await message.reply_photo(
-                photo=START_IMAGE,
+                START_IMAGE,
                 caption=text,
                 reply_markup=start_buttons()
             )
 
             return
 
-    except Exception as e:
+        except Exception as e:
 
-        log.warning(
-            "Start image failed: %s",
-            e
-        )
+            log.warning(
+                "Start image error: %s",
+                e
+            )
 
     await message.reply_text(
         text,
@@ -824,7 +1378,7 @@ async def start_cmd(
 
 
 # ============================================================
-#                             HELP
+# HELP
 # ============================================================
 
 @app.on_message(
@@ -841,13 +1395,12 @@ async def help_cmd(
 
     await message.reply_text(
         HELP_TEXT,
-        reply_markup=home_buttons(),
-        disable_web_page_preview=True
+        reply_markup=home_buttons()
     )
 
 
 # ============================================================
-#                          CALLBACKS
+# CALLBACK
 # ============================================================
 
 @app.on_callback_query()
@@ -865,7 +1418,9 @@ async def callbacks(
                 reply_markup=home_buttons()
             )
 
-            await query.answer()
+            await query.answer(
+                "Hᴇʟᴘ"
+            )
 
             return
 
@@ -883,7 +1438,9 @@ async def callbacks(
                 reply_markup=start_buttons()
             )
 
-            await query.answer()
+            await query.answer(
+                "Hᴏᴍᴇ"
+            )
 
             return
 
@@ -898,7 +1455,7 @@ async def callbacks(
 
 
 # ============================================================
-#                             AUTH
+# AUTH
 # ============================================================
 
 @app.on_message(
@@ -932,7 +1489,7 @@ async def auth_cmd(
     if not uid:
 
         return await message.reply_text(
-            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
+            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
             "<code>/auth USER_ID</code>"
         )
 
@@ -942,16 +1499,12 @@ async def auth_cmd(
     )
 
     await message.reply_text(
-        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"✅ Usᴇʀ <code>{uid}</code>\n"
-        "<b>Aᴜᴛʜᴏʀɪᴢᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ.</b>"
+        f"✅ <b>Usᴇʀ <code>{uid}</code> Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
     )
 
 
 # ============================================================
-#                           UNAUTH
+# UNAUTH
 # ============================================================
 
 @app.on_message(
@@ -996,18 +1549,16 @@ async def unauth_cmd(
 
     await message.reply_text(
         (
-            f"✅ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ Fʀᴏᴍ "
-            f"<code>{uid}</code>."
+            f"✅ <b>Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ: <code>{uid}</code></b>"
             if removed
             else
-            f"ℹ️ Usᴇʀ <code>{uid}</code> "
-            "Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ."
+            f"ℹ️ <b>Usᴇʀ <code>{uid}</code> Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
         )
     )
 
 
 # ============================================================
-#                        AUTH USERS
+# AUTH USERS
 # ============================================================
 
 @app.on_message(
@@ -1018,10 +1569,6 @@ async def authusers_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
     if not is_group(message):
 
         return await message.reply_text(
@@ -1031,7 +1578,7 @@ async def authusers_cmd(
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
+            "❌ <b>Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     users = list_local(
@@ -1045,14 +1592,12 @@ async def authusers_cmd(
         )
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀs</b>\n\n"
     )
 
     text += "\n".join(
-        f"➤ <code>{uid}</code>"
-        for uid in users
+        f"➤ <code>{x}</code>"
+        for x in users
     )
 
     await message.reply_text(
@@ -1061,20 +1606,16 @@ async def authusers_cmd(
 
 
 # ============================================================
-#                     CLEAR LOCAL AUTH
+# CLEAR LOCAL
 # ============================================================
 
 @app.on_message(
     filters.command("clearauthusers")
 )
-async def clearauthusers_cmd(
+async def clear_auth_cmd(
     _,
     message: Message
 ):
-
-    save_message_user(
-        message
-    )
 
     if not is_group(message):
 
@@ -1085,7 +1626,7 @@ async def clearauthusers_cmd(
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
+            "❌ <b>Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     count = clear_local(
@@ -1093,12 +1634,12 @@ async def clearauthusers_cmd(
     )
 
     await message.reply_text(
-        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>"
+        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Aᴜᴛʜ Usᴇʀ(s).</b>"
     )
 
 
 # ============================================================
-#                         GLOBAL AUTH
+# GLOBAL AUTH
 # ============================================================
 
 @app.on_message(
@@ -1109,11 +1650,7 @@ async def gauth_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
-    if not await owner_only(message):
+    if not await is_owner(message):
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
@@ -1135,14 +1672,9 @@ async def gauth_cmd(
     )
 
     await message.reply_text(
-        f"🌐 Usᴇʀ <code>{uid}</code>\n"
-        "<b>Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
+        f"🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Aᴅᴅᴇᴅ: <code>{uid}</code></b>"
     )
 
-
-# ============================================================
-#                       GLOBAL UNAUTH
-# ============================================================
 
 @app.on_message(
     filters.command("gunauth")
@@ -1152,11 +1684,7 @@ async def gunauth_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
-    if not await owner_only(message):
+    if not await is_owner(message):
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
@@ -1179,18 +1707,13 @@ async def gunauth_cmd(
 
     await message.reply_text(
         (
-            f"✅ Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ: "
-            f"<code>{uid}</code>"
+            f"✅ <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ: <code>{uid}</code></b>"
             if removed
             else
-            f"ℹ️ Usᴇʀ <code>{uid}</code> Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ."
+            f"ℹ️ <b>Usᴇʀ <code>{uid}</code> Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
         )
     )
 
-
-# ============================================================
-#                         GLOBAL USERS
-# ============================================================
 
 @app.on_message(
     filters.command("gusers")
@@ -1200,11 +1723,7 @@ async def gusers_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
-    if not await owner_only(message):
+    if not await is_owner(message):
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
@@ -1219,14 +1738,12 @@ async def gusers_cmd(
         )
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀs</b>\n\n"
     )
 
     text += "\n".join(
-        f"➤ <code>{uid}</code>"
-        for uid in users
+        f"➤ <code>{x}</code>"
+        for x in users
     )
 
     await message.reply_text(
@@ -1234,23 +1751,15 @@ async def gusers_cmd(
     )
 
 
-# ============================================================
-#                     CLEAR GLOBAL AUTH
-# ============================================================
-
 @app.on_message(
     filters.command("cleargusers")
 )
-async def cleargusers_cmd(
+async def clear_global_cmd(
     _,
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
-    if not await owner_only(message):
+    if not await is_owner(message):
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
@@ -1264,7 +1773,7 @@ async def cleargusers_cmd(
 
 
 # ============================================================
-#                       ADMIN EDIT MODE
+# ADMIN EDIT
 # ============================================================
 
 @app.on_message(
@@ -1274,10 +1783,6 @@ async def adminedit_cmd(
     _,
     message: Message
 ):
-
-    save_message_user(
-        message
-    )
 
     if not is_group(message):
 
@@ -1336,7 +1841,7 @@ async def adminedit_cmd(
 
 
 # ============================================================
-#                       EDIT GUARDIAN
+# EDIT GUARDIAN
 # ============================================================
 
 @app.on_edited_message(
@@ -1355,19 +1860,17 @@ async def edited_guard(
 
     uid = message.from_user.id
 
-    save_user(
-        message.from_user
-    )
-
-    # Local auth users are protected
+    # Authorized user
     if local_authed(
         message.chat.id,
         uid
     ):
         return
 
-    # Global auth users are protected
-    if global_authed(uid):
+    # Global authorized user
+    if global_authed(
+        uid
+    ):
         return
 
     try:
@@ -1383,7 +1886,7 @@ async def edited_guard(
 
         status = None
 
-    # Admin / owner
+    # Admin / Owner
     if status in (
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.OWNER
@@ -1394,61 +1897,73 @@ async def edited_guard(
         ):
             return
 
-        await delete_quietly(
-            message
-        )
-
-        return
-
-    # Normal members
     await delete_quietly(
         message
     )
 
 
 # ============================================================
-#                         BROADCAST COPY
+# DELETE
 # ============================================================
 
-async def broadcast_copy(
+async def delete_quietly(message):
+
+    try:
+
+        await message.delete()
+
+        stat_inc(
+            "deleted_edits"
+        )
+
+    except FloodWait as e:
+
+        await asyncio.sleep(
+            e.value
+        )
+
+        try:
+            await message.delete()
+            stat_inc(
+                "deleted_edits"
+            )
+        except Exception:
+            pass
+
+    except RPCError:
+        pass
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# BROADCAST
+# ============================================================
+
+async def broadcast_message(
     source_message
 ):
 
-    users = users_col.find(
-        {
-            "is_bot": {
-                "$ne": True
-            }
-        },
-        {
-            "_id": 0,
-            "user_id": 1
-        }
+    user_ids = all_user_ids()
+
+    total = len(
+        user_ids
     )
 
-    total = 0
-    success = 0
+    sent = 0
     failed = 0
     removed = 0
 
-    for item in users:
-
-        user_id = item.get(
-            "user_id"
-        )
-
-        if not user_id:
-            continue
-
-        total += 1
+    for uid in user_ids:
 
         try:
 
             await source_message.copy(
-                chat_id=user_id
+                chat_id=uid
             )
 
-            success += 1
+            sent += 1
 
             await asyncio.sleep(
                 0.05
@@ -1463,10 +1978,10 @@ async def broadcast_copy(
             try:
 
                 await source_message.copy(
-                    chat_id=user_id
+                    chat_id=uid
                 )
 
-                success += 1
+                sent += 1
 
             except Exception:
 
@@ -1480,44 +1995,36 @@ async def broadcast_copy(
                 e
             ).lower()
 
-            if (
-                "blocked" in error
-                or "deactivated" in error
-                or "chat not found" in error
+            if any(
+                word in error
+                for word in (
+                    "blocked",
+                    "deactivated",
+                    "chat not found",
+                    "user is deactivated"
+                )
             ):
 
                 removed += 1
 
-                try:
+                remove_user(
+                    uid
+                )
 
-                    users_col.delete_one(
-                        {
-                            "user_id": user_id
-                        }
-                    )
-
-                except Exception:
-                    pass
-
-        except Exception as e:
+        except Exception:
 
             failed += 1
 
-            log.debug(
-                "Broadcast error: %s",
-                e
-            )
-
     return (
         total,
-        success,
+        sent,
         failed,
         removed
     )
 
 
 # ============================================================
-#                          BROADCAST
+# BROADCAST COMMAND
 # ============================================================
 
 @app.on_message(
@@ -1528,20 +2035,13 @@ async def broadcast_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
-    if not await owner_only(message):
+    if not await is_owner(message):
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    # --------------------------------------------------------
-    # REPLY BROADCAST
-    # --------------------------------------------------------
-
+    # Reply broadcast
     if message.reply_to_message:
 
         progress = await message.reply_text(
@@ -1551,10 +2051,10 @@ async def broadcast_cmd(
 
         (
             total,
-            success,
+            sent,
             failed,
             removed
-        ) = await broadcast_copy(
+        ) = await broadcast_message(
             message.reply_to_message
         )
 
@@ -1563,7 +2063,7 @@ async def broadcast_cmd(
             "       📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>\n"
             "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
             f"👥 Tᴏᴛᴀʟ: <code>{total}</code>\n"
-            f"✅ Sᴇɴᴛ: <code>{success}</code>\n"
+            f"✅ Sᴇɴᴛ: <code>{sent}</code>\n"
             f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
             f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
             "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛ𝛆ɗ.</b>"
@@ -1571,10 +2071,7 @@ async def broadcast_cmd(
 
         return
 
-    # --------------------------------------------------------
-    # TEXT BROADCAST
-    # --------------------------------------------------------
-
+    # Text broadcast
     parts = (
         message.text or ""
     ).split(
@@ -1585,61 +2082,44 @@ async def broadcast_cmd(
 
         return await message.reply_text(
             "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Uѕᴧɢ𝛆</b>\n\n"
-            "Tᴇxᴛ:\n"
             "<code>/broadcast Hello ❤️</code>\n\n"
-            "Oʀ Rᴇᴘʟʏ Tᴏ Aɴʏ Mᴇssᴀɢᴇ:\n"
+            "Oʀ Rᴇᴘʟʏ Tᴏ A Mᴇssᴀɢᴇ:\n"
             "<code>/broadcast</code>"
         )
 
     text = parts[1].strip()
 
     if not text:
-
         return await message.reply_text(
-            "❌ <b>Bʀᴏᴀᴅᴄᴀsᴛ Mᴇssᴀɢᴇ Is Eᴍᴘᴛʏ.</b>"
+            "❌ <b>Bʀᴏᴀᴅᴄᴀsᴛ Mᴇssᴀɢᴇ Eᴍᴘᴛʏ.</b>"
         )
 
-    progress = await message.reply_text(
-        "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀᴛ𝛆ɗ...</b>\n\n"
-        "⏳ Pʟᴇᴀsᴇ Wᴀɪᴛ..."
+    user_ids = all_user_ids()
+
+    total = len(
+        user_ids
     )
 
-    users = users_col.find(
-        {
-            "is_bot": {
-                "$ne": True
-            }
-        },
-        {
-            "_id": 0,
-            "user_id": 1
-        }
-    )
-
-    total = 0
-    success = 0
+    sent = 0
     failed = 0
     removed = 0
 
-    for item in users:
+    progress = await message.reply_text(
+        "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀʈ𝛆ɗ...</b>\n\n"
+        f"👥 Usᴇʀs: <code>{total}</code>\n"
+        "⏳ Pʟᴇᴀsᴇ Wᴀɪᴛ..."
+    )
 
-        user_id = item.get(
-            "user_id"
-        )
-
-        if not user_id:
-            continue
-
-        total += 1
+    for uid in user_ids:
 
         try:
 
             await app.send_message(
-                chat_id=user_id,
-                text=text
+                uid,
+                text
             )
 
-            success += 1
+            sent += 1
 
             await asyncio.sleep(
                 0.05
@@ -1654,11 +2134,11 @@ async def broadcast_cmd(
             try:
 
                 await app.send_message(
-                    chat_id=user_id,
-                    text=text
+                    uid,
+                    text
                 )
 
-                success += 1
+                sent += 1
 
             except Exception:
 
@@ -1672,24 +2152,20 @@ async def broadcast_cmd(
                 e
             ).lower()
 
-            if (
-                "blocked" in error
-                or "deactivated" in error
-                or "chat not found" in error
+            if any(
+                word in error
+                for word in (
+                    "blocked",
+                    "deactivated",
+                    "chat not found"
+                )
             ):
 
                 removed += 1
 
-                try:
-
-                    users_col.delete_one(
-                        {
-                            "user_id": user_id
-                        }
-                    )
-
-                except Exception:
-                    pass
+                remove_user(
+                    uid
+                )
 
         except Exception:
 
@@ -1700,7 +2176,7 @@ async def broadcast_cmd(
         "       📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"👥 Tᴏᴛᴀʟ: <code>{total}</code>\n"
-        f"✅ Sᴇɴᴛ: <code>{success}</code>\n"
+        f"✅ Sᴇɴᴛ: <code>{sent}</code>\n"
         f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
         f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
         "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛ𝛆ɗ.</b>"
@@ -1708,7 +2184,7 @@ async def broadcast_cmd(
 
 
 # ============================================================
-#                      BROADCAST STATS
+# BROADCAST STATS
 # ============================================================
 
 @app.on_message(
@@ -1719,33 +2195,27 @@ async def broadcast_stats_cmd(
     message: Message
 ):
 
-    if not await owner_only(message):
+    if not await is_owner(message):
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    total = users_col.count_documents(
-        {
-            "is_bot": {
-                "$ne": True
-            }
-        }
-    )
-
     await message.reply_text(
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "     📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀᴛs</b>\n"
+        "      📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀᴛs</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"👥 Sᴀᴠᴇᴅ Usᴇʀs: <code>{total}</code>\n"
-        f"▶️ Sᴛᴀʀᴛs: <code>{get_stat('starts')}</code>\n"
+        f"👥 Sᴀᴠᴇᴅ Usᴇʀs: "
+        f"<code>{user_count()}</code>\n"
+        f"▶️ Sᴛᴀʀᴛs: "
+        f"<code>{get_stat('starts')}</code>\n"
         f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
         f"<code>{get_stat('deleted_edits')}</code>"
     )
 
 
 # ============================================================
-#                            STATS
+# STATS
 # ============================================================
 
 @app.on_message(
@@ -1762,35 +2232,23 @@ async def stats_cmd(
             "❌ <b>Aᴅᴍɪɴ / Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    total_users = users_col.count_documents(
-        {
-            "is_bot": {
-                "$ne": True
-            }
-        }
-    )
-
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "        📊 <b>Kɪʀᴛɪ Sᴛᴀᴛs</b>\n"
+        "       📊 <b>Kɪʀᴛɪ Sᴛᴀᴛs</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"▶️ Sᴛᴀʀᴛs: "
         f"<code>{get_stat('starts')}</code>\n"
         f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
         f"<code>{get_stat('deleted_edits')}</code>\n"
         f"👥 Sᴀᴠᴇᴅ Usᴇʀs: "
-        f"<code>{total_users}</code>\n"
+        f"<code>{user_count()}</code>"
     )
 
     if is_group(message):
 
-        enabled = get_setting(
-            message.chat.id
-        )
-
         text += (
-            f"🛡️ Aᴅᴍɪɴ Eᴅɪᴛ: "
-            f"<b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>"
+            "\n🛡️ Aᴅᴍɪɴ Eᴅɪᴛ: "
+            f"<b>{'🟢 Oɴ' if get_setting(message.chat.id) else '🔴 Oғғ'}</b>"
         )
 
     await message.reply_text(
@@ -1799,7 +2257,7 @@ async def stats_cmd(
 
 
 # ============================================================
-#                              ID
+# ID
 # ============================================================
 
 @app.on_message(
@@ -1824,13 +2282,15 @@ async def id_cmd(
 
 
 # ============================================================
-#                            STARTUP
+# STARTUP
 # ============================================================
 
 if __name__ == "__main__":
 
+    init_database()
+
     log.info(
-        "======================================"
+        "=========================================="
     )
 
     log.info(
@@ -1838,7 +2298,8 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "MongoDB: CONNECTED"
+        "Database: %s",
+        "MongoDB" if USE_MONGO else "SQLite"
     )
 
     log.info(
@@ -1846,7 +2307,7 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "Owner/Admin system: ENABLED"
+        "Owner/Admin: ENABLED"
     )
 
     log.info(
@@ -1858,7 +2319,7 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "======================================"
+        "=========================================="
     )
 
     app.run()
