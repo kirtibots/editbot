@@ -5,6 +5,10 @@ import sqlite3
 import logging
 from contextlib import closing
 
+# ============================================================
+#                    KIRTI GUARDIAN BOT
+# ============================================================
+
 try:
     from pymongo import MongoClient
     PY_MONGO = True
@@ -13,23 +17,33 @@ except ImportError:
 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 from pyrogram.errors import RPCError, FloodWait
 
 
 # ============================================================
-#                    KIRTI GUARDIAN BOT
+#                         CONFIG
 # ============================================================
 
 API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+API_HASH = os.getenv("API_HASH", "").strip()
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "kirti_guardian")
+MONGO_DB_NAME = os.getenv(
+    "MONGO_DB_NAME",
+    "kirti_guardian"
+)
 
-START_IMAGE = os.getenv("START_IMAGE", "start.jpg").strip()
+START_IMAGE = os.getenv(
+    "START_IMAGE",
+    "start.jpg"
+).strip()
 
 BOT_USERNAME = os.getenv(
     "BOT_USERNAME",
@@ -53,7 +67,7 @@ SQLITE_DB = os.getenv(
 
 
 # ============================================================
-#                         CONFIG CHECK
+#                       CONFIG CHECK
 # ============================================================
 
 if not API_ID:
@@ -70,7 +84,7 @@ if not OWNER_ID:
 
 
 # ============================================================
-#                           LOGGING
+#                         LOGGING
 # ============================================================
 
 logging.basicConfig(
@@ -82,7 +96,7 @@ log = logging.getLogger("KirtiGuardian")
 
 
 # ============================================================
-#                           PYROGRAM
+#                          PYROGRAM
 # ============================================================
 
 app = Client(
@@ -95,7 +109,7 @@ app = Client(
 
 
 # ============================================================
-#                           DATABASE
+#                         DATABASE
 # ============================================================
 
 USE_MONGO = False
@@ -111,7 +125,7 @@ stats_col = None
 
 
 # ============================================================
-#                           SQLITE
+#                         SQLITE
 # ============================================================
 
 def sqlite_conn():
@@ -124,6 +138,7 @@ def sqlite_conn():
 
 
 def init_sqlite():
+
     with closing(sqlite_conn()) as con:
 
         con.execute("""
@@ -169,7 +184,7 @@ def init_sqlite():
 
 
 # ============================================================
-#                       DATABASE INIT
+#                      DATABASE INIT
 # ============================================================
 
 def init_database():
@@ -183,18 +198,32 @@ def init_database():
     global settings_col
     global stats_col
 
+    # SQLite always available
     init_sqlite()
 
+    # Mongo optional
     if not MONGO_URI:
+
         log.warning(
-            "MONGO_URI not set - SQLite fallback enabled."
+            "MONGO_URI not configured."
         )
+
+        log.warning(
+            "Using SQLite fallback."
+        )
+
         return
 
     if not PY_MONGO:
+
         log.warning(
-            "pymongo not installed - SQLite fallback enabled."
+            "pymongo not installed."
         )
+
+        log.warning(
+            "Using SQLite fallback."
+        )
+
         return
 
     try:
@@ -239,7 +268,9 @@ def init_database():
 
         USE_MONGO = True
 
-        log.info("MongoDB connected successfully.")
+        log.info(
+            "MongoDB connected successfully."
+        )
 
     except Exception as e:
 
@@ -251,12 +282,12 @@ def init_database():
         )
 
         log.warning(
-            "SQLite fallback enabled."
+            "Using SQLite fallback."
         )
 
 
 # ============================================================
-#                            STATS
+#                           STATS
 # ============================================================
 
 def stat_inc(key, amount=1):
@@ -264,6 +295,7 @@ def stat_inc(key, amount=1):
     if USE_MONGO:
 
         try:
+
             stats_col.update_one(
                 {"key": key},
                 {
@@ -273,7 +305,9 @@ def stat_inc(key, amount=1):
                 },
                 upsert=True
             )
+
             return
+
         except Exception:
             pass
 
@@ -283,7 +317,8 @@ def stat_inc(key, amount=1):
             INSERT INTO stats(key, value)
             VALUES(?, ?)
             ON CONFLICT(key)
-            DO UPDATE SET value=value+excluded.value
+            DO UPDATE SET
+                value=value+excluded.value
         """, (
             key,
             amount
@@ -297,6 +332,7 @@ def get_stat(key):
     if USE_MONGO:
 
         try:
+
             data = stats_col.find_one(
                 {"key": key}
             )
@@ -314,7 +350,11 @@ def get_stat(key):
     with closing(sqlite_conn()) as con:
 
         row = con.execute(
-            "SELECT value FROM stats WHERE key=?",
+            """
+            SELECT value
+            FROM stats
+            WHERE key=?
+            """,
             (key,)
         ).fetchone()
 
@@ -389,8 +429,13 @@ def save_user(user):
 
 def save_message_user(message):
 
-    if message and message.from_user:
-        save_user(message.from_user)
+    if (
+        message
+        and message.from_user
+    ):
+        save_user(
+            message.from_user
+        )
 
 
 def user_count():
@@ -398,18 +443,24 @@ def user_count():
     if USE_MONGO:
 
         try:
+
             return users_col.count_documents({
                 "is_bot": {
                     "$ne": True
                 }
             })
+
         except Exception:
             pass
 
     with closing(sqlite_conn()) as con:
 
         row = con.execute(
-            "SELECT COUNT(*) FROM users WHERE is_bot=0"
+            """
+            SELECT COUNT(*)
+            FROM users
+            WHERE is_bot=0
+            """
         ).fetchone()
 
     return int(row[0])
@@ -420,6 +471,7 @@ def all_user_ids():
     if USE_MONGO:
 
         try:
+
             return [
                 x["user_id"]
                 for x in users_col.find(
@@ -434,13 +486,18 @@ def all_user_ids():
                     }
                 )
             ]
+
         except Exception:
             pass
 
     with closing(sqlite_conn()) as con:
 
         rows = con.execute(
-            "SELECT user_id FROM users WHERE is_bot=0"
+            """
+            SELECT user_id
+            FROM users
+            WHERE is_bot=0
+            """
         ).fetchall()
 
     return [
@@ -454,17 +511,23 @@ def remove_user(user_id):
     if USE_MONGO:
 
         try:
+
             users_col.delete_one({
                 "user_id": user_id
             })
+
             return
+
         except Exception:
             pass
 
     with closing(sqlite_conn()) as con:
 
         con.execute(
-            "DELETE FROM users WHERE user_id=?",
+            """
+            DELETE FROM users
+            WHERE user_id=?
+            """,
             (user_id,)
         )
 
@@ -472,7 +535,7 @@ def remove_user(user_id):
 
 
 # ============================================================
-#                         GROUP CHECK
+#                       GROUP CHECK
 # ============================================================
 
 def is_group(message):
@@ -488,10 +551,13 @@ def is_group(message):
 
 
 # ============================================================
-#                         ADMIN CHECK
+#                       ADMIN CHECK
 # ============================================================
 
-async def is_admin(message, user_id=None):
+async def is_admin(
+    message,
+    user_id=None
+):
 
     if not message:
         return False
@@ -503,6 +569,7 @@ async def is_admin(message, user_id=None):
 
         user_id = message.from_user.id
 
+    # Bot owner
     if user_id == OWNER_ID:
         return True
 
@@ -529,13 +596,14 @@ async def is_admin(message, user_id=None):
 async def is_owner(message):
 
     return bool(
-        message.from_user
+        message
+        and message.from_user
         and message.from_user.id == OWNER_ID
     )
 
 
 # ============================================================
-#                          SETTINGS
+#                         SETTINGS
 # ============================================================
 
 def get_setting(chat_id):
@@ -548,12 +616,15 @@ def get_setting(chat_id):
                 "chat_id": chat_id
             })
 
+            if not data:
+                return False
+
             return bool(
                 data.get(
                     "admin_edit",
                     False
                 )
-            ) if data else False
+            )
 
         except Exception:
             pass
@@ -561,14 +632,21 @@ def get_setting(chat_id):
     with closing(sqlite_conn()) as con:
 
         row = con.execute(
-            "SELECT admin_edit FROM settings WHERE chat_id=?",
+            """
+            SELECT admin_edit
+            FROM settings
+            WHERE chat_id=?
+            """,
             (chat_id,)
         ).fetchone()
 
     return bool(row[0]) if row else False
 
 
-def set_setting(chat_id, enabled):
+def set_setting(
+    chat_id,
+    enabled
+):
 
     if USE_MONGO:
 
@@ -612,19 +690,27 @@ def set_setting(chat_id, enabled):
 
 
 # ============================================================
-#                         LOCAL AUTH
+#                       LOCAL AUTH
 # ============================================================
 
-def local_authed(chat_id, user_id):
+def local_authed(
+    chat_id,
+    user_id
+):
 
     if USE_MONGO:
 
         try:
 
-            return local_auth_col.find_one({
-                "chat_id": chat_id,
-                "user_id": user_id
-            }) is not None
+            return (
+                local_auth_col.find_one(
+                    {
+                        "chat_id": chat_id,
+                        "user_id": user_id
+                    }
+                )
+                is not None
+            )
 
         except Exception:
             pass
@@ -635,7 +721,8 @@ def local_authed(chat_id, user_id):
             """
             SELECT 1
             FROM local_auth
-            WHERE chat_id=? AND user_id=?
+            WHERE chat_id=?
+            AND user_id=?
             """,
             (
                 chat_id,
@@ -646,7 +733,10 @@ def local_authed(chat_id, user_id):
     return row is not None
 
 
-def add_local(chat_id, user_id):
+def add_local(
+    chat_id,
+    user_id
+):
 
     if USE_MONGO:
 
@@ -688,16 +778,21 @@ def add_local(chat_id, user_id):
         con.commit()
 
 
-def remove_local(chat_id, user_id):
+def remove_local(
+    chat_id,
+    user_id
+):
 
     if USE_MONGO:
 
         try:
 
-            result = local_auth_col.delete_one({
-                "chat_id": chat_id,
-                "user_id": user_id
-            })
+            result = local_auth_col.delete_one(
+                {
+                    "chat_id": chat_id,
+                    "user_id": user_id
+                }
+            )
 
             return result.deleted_count
 
@@ -709,7 +804,8 @@ def remove_local(chat_id, user_id):
         cur = con.execute(
             """
             DELETE FROM local_auth
-            WHERE chat_id=? AND user_id=?
+            WHERE chat_id=?
+            AND user_id=?
             """,
             (
                 chat_id,
@@ -740,7 +836,10 @@ def clear_local(chat_id):
     with closing(sqlite_conn()) as con:
 
         cur = con.execute(
-            "DELETE FROM local_auth WHERE chat_id=?",
+            """
+            DELETE FROM local_auth
+            WHERE chat_id=?
+            """,
             (chat_id,)
         )
 
@@ -793,7 +892,7 @@ def list_local(chat_id):
 
 
 # ============================================================
-#                         GLOBAL AUTH
+#                       GLOBAL AUTH
 # ============================================================
 
 def global_authed(user_id):
@@ -802,9 +901,14 @@ def global_authed(user_id):
 
         try:
 
-            return global_auth_col.find_one({
-                "user_id": user_id
-            }) is not None
+            return (
+                global_auth_col.find_one(
+                    {
+                        "user_id": user_id
+                    }
+                )
+                is not None
+            )
 
         except Exception:
             pass
@@ -812,7 +916,11 @@ def global_authed(user_id):
     with closing(sqlite_conn()) as con:
 
         row = con.execute(
-            "SELECT 1 FROM global_auth WHERE user_id=?",
+            """
+            SELECT 1
+            FROM global_auth
+            WHERE user_id=?
+            """,
             (user_id,)
         ).fetchone()
 
@@ -845,7 +953,10 @@ def add_global(user_id):
     with closing(sqlite_conn()) as con:
 
         con.execute(
-            "INSERT OR IGNORE INTO global_auth(user_id) VALUES(?)",
+            """
+            INSERT OR IGNORE INTO global_auth(user_id)
+            VALUES(?)
+            """,
             (user_id,)
         )
 
@@ -870,7 +981,10 @@ def remove_global(user_id):
     with closing(sqlite_conn()) as con:
 
         cur = con.execute(
-            "DELETE FROM global_auth WHERE user_id=?",
+            """
+            DELETE FROM global_auth
+            WHERE user_id=?
+            """,
             (user_id,)
         )
 
@@ -942,16 +1056,20 @@ def list_global():
 
 
 # ============================================================
-#                         USER RESOLVER
+#                       USER RESOLVER
 # ============================================================
 
-def get_target(message):
+def target_user(message):
 
     if (
         message.reply_to_message
         and message.reply_to_message.from_user
     ):
-        return message.reply_to_message.from_user.id
+        return (
+            message.reply_to_message
+            .from_user
+            .id
+        )
 
     parts = (
         message.text or ""
@@ -972,7 +1090,7 @@ def get_target(message):
 
 async def resolve_user(message):
 
-    target = get_target(message)
+    target = target_user(message)
 
     if target is None:
         return None
@@ -994,10 +1112,57 @@ async def resolve_user(message):
 
 
 # ============================================================
-#                         START MESSAGE
+#                      DELETE MESSAGE
 # ============================================================
 
-def start_text(user, bot):
+async def delete_quietly(message):
+
+    try:
+
+        await message.delete()
+
+        stat_inc(
+            "deleted_edits"
+        )
+
+        return True
+
+    except FloodWait as e:
+
+        await asyncio.sleep(
+            e.value
+        )
+
+        try:
+
+            await message.delete()
+
+            stat_inc(
+                "deleted_edits"
+            )
+
+            return True
+
+        except Exception:
+            return False
+
+    except RPCError:
+
+        return False
+
+    except Exception:
+
+        return False
+
+
+# ============================================================
+#                         START TEXT
+# ============================================================
+
+def start_text(
+    user,
+    bot
+):
 
     user_name = (
         user.first_name
@@ -1006,7 +1171,7 @@ def start_text(user, bot):
 
     bot_name = (
         bot.first_name
-        or "Kirti Guardian"
+        or "Kirti"
     )
 
     user_mention = (
@@ -1022,8 +1187,8 @@ def start_text(user, bot):
 
     return f"""
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
-      🛡️ <b>Ҡɪʀᴛɪ Gᴜᴀʀᴅɪᴀɴ</b>
-          <i>Bᴏᴛ V𝟸</i>
+       🛡️ <b>Kɪʀᴛɪ Gᴜᴀʀᴅɪᴀɴ</b>
+              <i>Bᴏᴛ V𝟸</i>
 ╰━━━━━━━━━━━━━━━━━━━━━━╯
 
 👋 <b>Hᴇʟʟᴏ {user_mention} ❤️</b>
@@ -1033,9 +1198,11 @@ def start_text(user, bot):
 
 🚨 <b>Aᴜᴛᴏ Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>
 
-🛡️ <b>I Cᴀɴ Dᴇʟᴇᴛᴇ
+🛡️ <b>I Cᴀɴ Aᴜᴛᴏ-Dᴇʟᴇᴛᴇ
 Eᴅɪᴛᴇᴅ Mᴇssᴀɢᴇs
 Fʀᴏᴍ Yᴏᴜʀ Gʀᴏᴜᴘ.</b>
+
+✨ <b>Cʟᴇᴀɴ • Sᴀғᴇ • Sᴇᴄᴜʀᴇ</b>
 
 ⭐ <b>Aᴅᴅ Mᴇ Tᴏ Yᴏᴜʀ Gʀᴏᴜᴘ</b>
 
@@ -1056,7 +1223,7 @@ Pᴇʀᴍɪssɪᴏɴ.</b>
 
 HELP_TEXT = """
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
-       📚 <b>Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs</b>
+      📚 <b>Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs</b>
 ╰━━━━━━━━━━━━━━━━━━━━━━╯
 
 👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>
@@ -1080,7 +1247,7 @@ HELP_TEXT = """
 
 ➤ <code>/broadcast MESSAGE</code>
 
-➤ Rᴇᴘʟʏ Tᴏ Mᴇssᴀɢᴇ:
+➤ Rᴇᴘʟʏ Tᴏ A Mᴇssᴀɢᴇ:
 <code>/broadcast</code>
 
 ➤ <code>/broadcast_stats</code>
@@ -1090,11 +1257,12 @@ HELP_TEXT = """
 ➤ <code>/adminedit on</code>
 ➤ <code>/adminedit off</code>
 
-📊 <b>Oᴛʜᴇʀ</b>
+📊 <b>Sᴛᴀᴛs</b>
 
-➤ <code>/start</code>
-➤ <code>/help</code>
 ➤ <code>/stats</code>
+
+🆔 <b>Usᴇʀ ID</b>
+
 ➤ <code>/id</code>
 
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -1105,63 +1273,50 @@ Mᴇssᴀɢᴇs Pᴇʀᴍɪssɪᴏɴ</b>
 
 
 # ============================================================
-#                            BUTTONS
+#                           BUTTONS
 # ============================================================
 
 def start_buttons():
 
-    rows = [
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton(
-                "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
-                url=(
-                    f"https://t.me/"
-                    f"{BOT_USERNAME}"
-                    f"?startgroup=true"
+            [
+                InlineKeyboardButton(
+                    "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
+                    url=(
+                        f"https://t.me/"
+                        f"{BOT_USERNAME}"
+                        f"?startgroup=true"
+                    )
                 )
-            )
-        ]
-    ]
+            ],
 
-    contacts = []
+            [
+                InlineKeyboardButton(
+                    "💬 Oᴡɴᴇʀ",
+                    url=(
+                        f"https://t.me/"
+                        f"{OWNER_USERNAME}"
+                    )
+                ),
 
-    if OWNER_USERNAME:
-
-        contacts.append(
-            InlineKeyboardButton(
-                "💬 Oᴡɴᴇʀ",
-                url=(
-                    f"https://t.me/"
-                    f"{OWNER_USERNAME}"
+                InlineKeyboardButton(
+                    "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
+                    url=(
+                        f"https://t.me/"
+                        f"{SUPPORT_USERNAME}"
+                    )
                 )
-            )
-        )
+            ],
 
-    if SUPPORT_USERNAME:
-
-        contacts.append(
-            InlineKeyboardButton(
-                "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
-                url=(
-                    f"https://t.me/"
-                    f"{SUPPORT_USERNAME}"
+            [
+                InlineKeyboardButton(
+                    "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
+                    callback_data="help"
                 )
-            )
-        )
-
-    if contacts:
-        rows.append(contacts)
-
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
-                callback_data="help"
-            )
+            ]
         ]
     )
-
-    return InlineKeyboardMarkup(rows)
 
 
 def home_buttons():
@@ -1179,20 +1334,27 @@ def home_buttons():
 
 
 # ============================================================
-#                           START
+#                            START
 # ============================================================
 
 @app.on_message(
     filters.command("start")
 )
-async def start_cmd(_, message: Message):
+async def start_cmd(
+    _,
+    message: Message
+):
 
     if not message.from_user:
         return
 
-    save_message_user(message)
+    save_message_user(
+        message
+    )
 
-    stat_inc("starts")
+    stat_inc(
+        "starts"
+    )
 
     bot = await app.get_me()
 
@@ -1201,6 +1363,7 @@ async def start_cmd(_, message: Message):
         bot
     )
 
+    # Start image
     if (
         START_IMAGE
         and os.path.exists(START_IMAGE)
@@ -1219,10 +1382,11 @@ async def start_cmd(_, message: Message):
         except Exception as e:
 
             log.warning(
-                "Start image error: %s",
+                "Start image failed: %s",
                 e
             )
 
+    # Fallback text
     await message.reply_text(
         text,
         reply_markup=start_buttons()
@@ -1230,15 +1394,20 @@ async def start_cmd(_, message: Message):
 
 
 # ============================================================
-#                            HELP
+#                             HELP
 # ============================================================
 
 @app.on_message(
     filters.command("help")
 )
-async def help_cmd(_, message: Message):
+async def help_cmd(
+    _,
+    message: Message
+):
 
-    save_message_user(message)
+    save_message_user(
+        message
+    )
 
     await message.reply_text(
         HELP_TEXT,
@@ -1251,7 +1420,10 @@ async def help_cmd(_, message: Message):
 # ============================================================
 
 @app.on_callback_query()
-async def callbacks(_, query):
+async def callbacks(
+    _,
+    query
+):
 
     try:
 
@@ -1262,7 +1434,10 @@ async def callbacks(_, query):
                 reply_markup=home_buttons()
             )
 
-            await query.answer("Hᴇʟᴘ")
+            await query.answer(
+                "Hᴇʟᴘ"
+            )
+
             return
 
         if query.data == "home":
@@ -1279,7 +1454,10 @@ async def callbacks(_, query):
                 reply_markup=start_buttons()
             )
 
-            await query.answer("Hᴏᴍᴇ")
+            await query.answer(
+                "Hᴏᴍᴇ"
+            )
+
             return
 
         await query.answer()
@@ -1299,9 +1477,14 @@ async def callbacks(_, query):
 @app.on_message(
     filters.command("auth")
 )
-async def auth_cmd(_, message: Message):
+async def auth_cmd(
+    _,
+    message: Message
+):
 
-    save_message_user(message)
+    save_message_user(
+        message
+    )
 
     if not is_group(message):
 
@@ -1315,7 +1498,9 @@ async def auth_cmd(_, message: Message):
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
@@ -1330,7 +1515,11 @@ async def auth_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        f"✅ <b>Usᴇʀ <code>{uid}</code> Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"✅ Usᴇʀ: <code>{uid}</code>\n"
+        "✨ <b>Aᴜᴛʜᴏʀɪᴢᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ.</b>"
     )
 
 
@@ -1341,7 +1530,10 @@ async def auth_cmd(_, message: Message):
 @app.on_message(
     filters.command("unauth")
 )
-async def unauth_cmd(_, message: Message):
+async def unauth_cmd(
+    _,
+    message: Message
+):
 
     if not is_group(message):
 
@@ -1355,12 +1547,14 @@ async def unauth_cmd(_, message: Message):
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
+            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/unauth USER_ID</code>"
         )
 
@@ -1369,13 +1563,22 @@ async def unauth_cmd(_, message: Message):
         uid
     )
 
-    await message.reply_text(
-        (
-            f"✅ <b>Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ: <code>{uid}</code></b>"
-            if removed
-            else
-            f"ℹ️ <b>Usᴇʀ <code>{uid}</code> Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
+    if removed:
+
+        text = (
+            f"✅ <b>Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ:</b>\n"
+            f"<code>{uid}</code>"
         )
+
+    else:
+
+        text = (
+            f"ℹ️ <b>Usᴇʀ Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
+            f"<code>{uid}</code>"
+        )
+
+    await message.reply_text(
+        text
     )
 
 
@@ -1386,7 +1589,10 @@ async def unauth_cmd(_, message: Message):
 @app.on_message(
     filters.command("authusers")
 )
-async def authusers_cmd(_, message: Message):
+async def authusers_cmd(
+    _,
+    message: Message
+):
 
     if not is_group(message):
 
@@ -1397,7 +1603,7 @@ async def authusers_cmd(_, message: Message):
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Aᴅᴍɪɴ Oɴʟʏ.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     users = list_local(
@@ -1411,7 +1617,9 @@ async def authusers_cmd(_, message: Message):
         )
 
     text = (
-        "👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀs</b>\n\n"
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "      👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
     )
 
     text += "\n".join(
@@ -1419,7 +1627,9 @@ async def authusers_cmd(_, message: Message):
         for uid in users
     )
 
-    await message.reply_text(text)
+    await message.reply_text(
+        text
+    )
 
 
 # ============================================================
@@ -1429,7 +1639,10 @@ async def authusers_cmd(_, message: Message):
 @app.on_message(
     filters.command("clearauthusers")
 )
-async def clear_auth_cmd(_, message: Message):
+async def clear_auth_cmd(
+    _,
+    message: Message
+):
 
     if not is_group(message):
 
@@ -1440,7 +1653,7 @@ async def clear_auth_cmd(_, message: Message):
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Aᴅᴍɪɴ Oɴʟʏ.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     count = clear_local(
@@ -1448,7 +1661,7 @@ async def clear_auth_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Aᴜᴛʜ Usᴇʀ(s).</b>"
+        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>"
     )
 
 
@@ -1459,7 +1672,10 @@ async def clear_auth_cmd(_, message: Message):
 @app.on_message(
     filters.command("gauth")
 )
-async def gauth_cmd(_, message: Message):
+async def gauth_cmd(
+    _,
+    message: Message
+):
 
     if not await is_owner(message):
 
@@ -1467,26 +1683,34 @@ async def gauth_cmd(_, message: Message):
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
+            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/gauth USER_ID</code>"
         )
 
-    add_global(uid)
+    add_global(
+        uid
+    )
 
     await message.reply_text(
-        f"🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Aᴅᴅᴇᴅ: <code>{uid}</code></b>"
+        f"🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Aᴅᴅᴇᴅ:</b>\n"
+        f"<code>{uid}</code>"
     )
 
 
 @app.on_message(
     filters.command("gunauth")
 )
-async def gunauth_cmd(_, message: Message):
+async def gunauth_cmd(
+    _,
+    message: Message
+):
 
     if not await is_owner(message):
 
@@ -1494,23 +1718,29 @@ async def gunauth_cmd(_, message: Message):
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
+            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/gunauth USER_ID</code>"
         )
 
-    removed = remove_global(uid)
+    removed = remove_global(
+        uid
+    )
 
     await message.reply_text(
         (
-            f"✅ <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ: <code>{uid}</code></b>"
+            f"✅ <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ:</b>\n"
+            f"<code>{uid}</code>"
             if removed
             else
-            f"ℹ️ <b>Usᴇʀ <code>{uid}</code> Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
+            f"ℹ️ <b>Usᴇʀ Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
+            f"<code>{uid}</code>"
         )
     )
 
@@ -1518,7 +1748,10 @@ async def gunauth_cmd(_, message: Message):
 @app.on_message(
     filters.command("gusers")
 )
-async def gusers_cmd(_, message: Message):
+async def gusers_cmd(
+    _,
+    message: Message
+):
 
     if not await is_owner(message):
 
@@ -1543,13 +1776,18 @@ async def gusers_cmd(_, message: Message):
         for uid in users
     )
 
-    await message.reply_text(text)
+    await message.reply_text(
+        text
+    )
 
 
 @app.on_message(
     filters.command("cleargusers")
 )
-async def clear_global_cmd(_, message: Message):
+async def clear_global_cmd(
+    _,
+    message: Message
+):
 
     if not await is_owner(message):
 
@@ -1565,13 +1803,16 @@ async def clear_global_cmd(_, message: Message):
 
 
 # ============================================================
-#                       ADMIN EDIT
+#                        ADMIN EDIT
 # ============================================================
 
 @app.on_message(
     filters.command("adminedit")
 )
-async def adminedit_cmd(_, message: Message):
+async def adminedit_cmd(
+    _,
+    message: Message
+):
 
     if not is_group(message):
 
@@ -1602,7 +1843,7 @@ async def adminedit_cmd(_, message: Message):
         )
 
         return await message.reply_text(
-            "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Dᴇʟᴇᴛᴇ</b>\n\n"
+            "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>\n\n"
             f"Cᴜʀʀᴇɴᴛ: <b>{current}</b>\n\n"
             "<code>/adminedit on</code>\n"
             "<code>/adminedit off</code>"
@@ -1619,8 +1860,9 @@ async def adminedit_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Dᴇʟᴇᴛᴇ</b>\n\n"
-        f"Sᴛᴀᴛᴜs: <b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>"
+        "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>\n\n"
+        f"Sᴛᴀᴛᴜs: "
+        f"<b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>"
     )
 
 
@@ -1628,10 +1870,17 @@ async def adminedit_cmd(_, message: Message):
 #                       EDIT GUARDIAN
 # ============================================================
 
+# IMPORTANT:
+# filters.group already handles Telegram groups/supergroups.
+# DO NOT use filters.supergroup because it does not exist.
+
 @app.on_edited_message(
     filters.group
 )
-async def edited_guard(_, message: Message):
+async def edited_guard(
+    _,
+    message: Message
+):
 
     if not message.from_user:
         return
@@ -1641,12 +1890,14 @@ async def edited_guard(_, message: Message):
 
     uid = message.from_user.id
 
+    # Local authorized
     if local_authed(
         message.chat.id,
         uid
     ):
         return
 
+    # Global authorized
     if global_authed(uid):
         return
 
@@ -1663,57 +1914,23 @@ async def edited_guard(_, message: Message):
 
         status = None
 
+    # Admin/Owner
     if status in (
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.OWNER
     ):
 
+        # Admin edits are allowed by default.
+        # Delete them only when adminedit is ON.
         if not get_setting(
             message.chat.id
         ):
             return
 
+    # Normal member edit
     await delete_quietly(
         message
     )
-
-
-# ============================================================
-#                        DELETE EDIT
-# ============================================================
-
-async def delete_quietly(message):
-
-    try:
-
-        await message.delete()
-
-        stat_inc(
-            "deleted_edits"
-        )
-
-    except FloodWait as e:
-
-        await asyncio.sleep(
-            e.value
-        )
-
-        try:
-
-            await message.delete()
-
-            stat_inc(
-                "deleted_edits"
-            )
-
-        except Exception:
-            pass
-
-    except RPCError:
-        pass
-
-    except Exception:
-        pass
 
 
 # ============================================================
@@ -1723,7 +1940,10 @@ async def delete_quietly(message):
 @app.on_message(
     filters.command("broadcast")
 )
-async def broadcast_cmd(_, message: Message):
+async def broadcast_cmd(
+    _,
+    message: Message
+):
 
     if not await is_owner(message):
 
@@ -1748,7 +1968,7 @@ async def broadcast_cmd(_, message: Message):
         progress = await message.reply_text(
             "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀʈ𝛆ɗ...</b>\n\n"
             f"👥 Usᴇʀs: <code>{len(user_ids)}</code>\n"
-            "⏳ Pʟᴇᴀsᴇ Wᴀɪᴛ..."
+            "⏳ <b>Pʟᴇᴀsᴇ Wᴀɪᴛ...</b>"
         )
 
         sent = 0
@@ -1765,7 +1985,9 @@ async def broadcast_cmd(_, message: Message):
 
                 sent += 1
 
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(
+                    0.05
+                )
 
             except FloodWait as e:
 
@@ -1782,6 +2004,7 @@ async def broadcast_cmd(_, message: Message):
                     sent += 1
 
                 except Exception:
+
                     failed += 1
 
             except RPCError as e:
@@ -1791,8 +2014,8 @@ async def broadcast_cmd(_, message: Message):
                 error = str(e).lower()
 
                 if any(
-                    x in error
-                    for x in (
+                    word in error
+                    for word in (
                         "blocked",
                         "deactivated",
                         "chat not found"
@@ -1800,7 +2023,6 @@ async def broadcast_cmd(_, message: Message):
                 ):
 
                     removed += 1
-
                     remove_user(uid)
 
             except Exception:
@@ -1850,7 +2072,7 @@ async def broadcast_cmd(_, message: Message):
     progress = await message.reply_text(
         "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀʈ𝛆ɗ...</b>\n\n"
         f"👥 Usᴇʀs: <code>{len(user_ids)}</code>\n"
-        "⏳ Pʟᴇᴀsᴇ Wᴀɪᴛ..."
+        "⏳ <b>Pʟᴇᴀsᴇ Wᴀɪᴛ...</b>"
     )
 
     sent = 0
@@ -1868,7 +2090,9 @@ async def broadcast_cmd(_, message: Message):
 
             sent += 1
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(
+                0.05
+            )
 
         except FloodWait as e:
 
@@ -1896,8 +2120,8 @@ async def broadcast_cmd(_, message: Message):
             error = str(e).lower()
 
             if any(
-                x in error
-                for x in (
+                word in error
+                for word in (
                     "blocked",
                     "deactivated",
                     "chat not found"
@@ -1905,7 +2129,6 @@ async def broadcast_cmd(_, message: Message):
             ):
 
                 removed += 1
-
                 remove_user(uid)
 
         except Exception:
@@ -1925,13 +2148,16 @@ async def broadcast_cmd(_, message: Message):
 
 
 # ============================================================
-#                      BROADCAST STATS
+#                     BROADCAST STATS
 # ============================================================
 
 @app.on_message(
     filters.command("broadcast_stats")
 )
-async def broadcast_stats_cmd(_, message: Message):
+async def broadcast_stats_cmd(
+    _,
+    message: Message
+):
 
     if not await is_owner(message):
 
@@ -1959,7 +2185,10 @@ async def broadcast_stats_cmd(_, message: Message):
 @app.on_message(
     filters.command("stats")
 )
-async def stats_cmd(_, message: Message):
+async def stats_cmd(
+    _,
+    message: Message
+):
 
     if not await is_admin(message):
 
@@ -1969,7 +2198,7 @@ async def stats_cmd(_, message: Message):
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       📊 <b>Kɪʀᴛɪ Sᴛᴀᴛs</b>\n"
+        "        📊 <b>Kɪʀᴛɪ Sᴛᴀᴛs</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"▶️ Sᴛᴀʀᴛs: "
         f"<code>{get_stat('starts')}</code>\n"
@@ -1986,19 +2215,26 @@ async def stats_cmd(_, message: Message):
             f"<b>{'🟢 Oɴ' if get_setting(message.chat.id) else '🔴 Oғғ'}</b>"
         )
 
-    await message.reply_text(text)
+    await message.reply_text(
+        text
+    )
 
 
 # ============================================================
-#                             ID
+#                            ID
 # ============================================================
 
 @app.on_message(
     filters.private & filters.command("id")
 )
-async def id_cmd(_, message: Message):
+async def id_cmd(
+    _,
+    message: Message
+):
 
-    save_message_user(message)
+    save_message_user(
+        message
+    )
 
     if not message.from_user:
         return
@@ -2018,7 +2254,7 @@ if __name__ == "__main__":
     init_database()
 
     log.info(
-        "=========================================="
+        "======================================"
     )
 
     log.info(
@@ -2031,11 +2267,16 @@ if __name__ == "__main__":
     )
 
     log.info(
+        "Start Image: %s",
+        START_IMAGE
+    )
+
+    log.info(
         "Broadcast: ENABLED"
     )
 
     log.info(
-        "Owner/Admin: ENABLED"
+        "Owner/Admin Auth: ENABLED"
     )
 
     log.info(
@@ -2043,7 +2284,7 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "Status: REMOVED"
+        "Status Button: REMOVED"
     )
 
     log.info(
@@ -2051,7 +2292,7 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "=========================================="
+        "======================================"
     )
 
     app.run()
