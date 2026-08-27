@@ -43,7 +43,7 @@ MONGO_DB_NAME = os.getenv(
 
 START_IMAGE = os.getenv(
     "START_IMAGE",
-    "start.jpg"
+    "https://h.uguu.se/FekWWcsz.jpg"
 ).strip()
 
 BOT_USERNAME = os.getenv(
