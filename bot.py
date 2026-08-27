@@ -29,7 +29,7 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "kirti_guardian").strip()
 
-START_IMAGE = os.getenv("START_IMAGE", "start.jpg").strip()
+START_IMAGE = os.getenv("START_IMAGE", "https://h.uguu.se/FekWWcsz.jpg").strip()
 
 BOT_USERNAME = os.getenv(
     "BOT_USERNAME",
