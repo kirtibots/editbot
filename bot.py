@@ -23,7 +23,7 @@ from pyrogram.errors import RPCError, FloodWait
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "").strip()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+OWNER_ID = int(os.getenv("OWNER_ID", "8857291657"))
 
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "kirti_guardian").strip()
@@ -38,11 +38,11 @@ BOT_USERNAME = os.getenv(
 ).strip().lstrip("@")
 
 OWNER_USERNAME = os.getenv(
-    "OWNER_USERNAME", ""
+    "OWNER_USERNAME", "Only_badnam"
 ).strip().lstrip("@")
 
 SUPPORT_USERNAME = os.getenv(
-    "SUPPORT_USERNAME", ""
+    "SUPPORT_USERNAME", "annu_updates"
 ).strip().lstrip("@")
 
 SQLITE_DB = os.getenv("SQLITE_DB", "kirti_guardian.db")
