@@ -5,10 +5,6 @@ import sqlite3
 import logging
 from contextlib import closing
 
-# ============================================================
-#                    KIRTI GUARDIAN BOT
-# ============================================================
-
 try:
     from pymongo import MongoClient
     MONGO_AVAILABLE = True
@@ -16,35 +12,24 @@ except ImportError:
     MONGO_AVAILABLE = False
 
 from pyrogram import Client, filters
-from pyrogram.enums import ChatType, ChatMemberStatus
-from pyrogram.types import (
-    Message,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+from pyrogram.enums import ChatType, ChatMemberStatus, ParseMode
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import RPCError, FloodWait
 
 
 # ============================================================
-#                         CONFIG
+#                    KIRTI GUARDIAN BOT
 # ============================================================
 
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "").strip()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
-MONGO_DB_NAME = os.getenv(
-    "MONGO_DB_NAME",
-    "kirti_guardian"
-).strip()
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "kirti_guardian").strip()
 
-START_IMAGE = os.getenv(
-    "START_IMAGE",
-    "https://h.uguu.se/FekWWcsz.jpg"
-).strip()
+START_IMAGE = os.getenv("START_IMAGE", "start.jpg").strip()
 
 BOT_USERNAME = os.getenv(
     "BOT_USERNAME",
@@ -68,7 +53,7 @@ SQLITE_DB = os.getenv(
 
 
 # ============================================================
-#                       CONFIG CHECK
+#                         CONFIG
 # ============================================================
 
 if not API_ID:
@@ -130,7 +115,6 @@ stats_col = None
 # ============================================================
 
 def sqlite_conn():
-
     con = sqlite3.connect(
         SQLITE_DB,
         timeout=30
@@ -190,7 +174,7 @@ def init_sqlite():
 
 
 # ============================================================
-#                      DATABASE INIT
+#                       DATABASE INIT
 # ============================================================
 
 def init_database():
@@ -207,27 +191,13 @@ def init_database():
     init_sqlite()
 
     if not MONGO_URI:
-
-        log.warning(
-            "MONGO_URI is not configured."
-        )
-
-        log.warning(
-            "SQLite fallback enabled."
-        )
-
+        log.warning("MONGO_URI not configured.")
+        log.warning("Using SQLite fallback.")
         return
 
     if not MONGO_AVAILABLE:
-
-        log.warning(
-            "pymongo is not installed."
-        )
-
-        log.warning(
-            "SQLite fallback enabled."
-        )
-
+        log.warning("pymongo is not installed.")
+        log.warning("Using SQLite fallback.")
         return
 
     try:
@@ -239,9 +209,7 @@ def init_database():
 
         mongo.admin.command("ping")
 
-        mongo_db = mongo[
-            MONGO_DB_NAME
-        ]
+        mongo_db = mongo[MONGO_DB_NAME]
 
         users_col = mongo_db["users"]
         local_auth_col = mongo_db["local_auth"]
@@ -274,9 +242,7 @@ def init_database():
 
         USE_MONGO = True
 
-        log.info(
-            "MongoDB connected successfully."
-        )
+        log.info("MongoDB connected successfully.")
 
     except Exception as e:
 
@@ -288,7 +254,7 @@ def init_database():
         )
 
         log.warning(
-            "SQLite fallback enabled."
+            "Using SQLite fallback."
         )
 
 
@@ -296,19 +262,14 @@ def init_database():
 #                           STATS
 # ============================================================
 
-def stat_inc(
-    key,
-    amount=1
-):
+def stat_inc(key, amount=1):
 
     if USE_MONGO:
 
         try:
 
             stats_col.update_one(
-                {
-                    "key": key
-                },
+                {"key": key},
                 {
                     "$inc": {
                         "value": amount
@@ -325,12 +286,8 @@ def stat_inc(
     with closing(sqlite_conn()) as con:
 
         con.execute("""
-            INSERT INTO stats(
-                key,
-                value
-            )
+            INSERT INTO stats(key, value)
             VALUES(?, ?)
-
             ON CONFLICT(key)
             DO UPDATE SET
                 value=value+excluded.value
@@ -349,18 +306,12 @@ def get_stat(key):
         try:
 
             data = stats_col.find_one(
-                {
-                    "key": key
-                }
+                {"key": key}
             )
 
             if data:
-
                 return int(
-                    data.get(
-                        "value",
-                        0
-                    )
+                    data.get("value", 0)
                 )
 
             return 0
@@ -379,9 +330,7 @@ def get_stat(key):
             (key,)
         ).fetchone()
 
-    return int(
-        row[0]
-    ) if row else 0
+    return int(row[0]) if row else 0
 
 
 # ============================================================
@@ -398,9 +347,7 @@ def save_user(user):
         try:
 
             users_col.update_one(
-                {
-                    "user_id": user.id
-                },
+                {"user_id": user.id},
                 {
                     "$set": {
                         "user_id": user.id,
@@ -457,7 +404,6 @@ def save_message_user(message):
         message
         and message.from_user
     ):
-
         save_user(
             message.from_user
         )
@@ -490,9 +436,7 @@ def user_count():
             """
         ).fetchone()
 
-    return int(
-        row[0]
-    )
+    return int(row[0])
 
 
 def all_user_ids():
@@ -542,9 +486,7 @@ def remove_user(user_id):
         try:
 
             users_col.delete_one(
-                {
-                    "user_id": user_id
-                }
+                {"user_id": user_id}
             )
 
             return
@@ -598,11 +540,8 @@ async def is_admin(
         if not message.from_user:
             return False
 
-        user_id = (
-            message.from_user.id
-        )
+        user_id = message.from_user.id
 
-    # Bot owner can use admin commands
     if user_id == OWNER_ID:
         return True
 
@@ -646,20 +585,18 @@ def get_setting(chat_id):
         try:
 
             data = settings_col.find_one(
-                {
-                    "chat_id": chat_id
-                }
+                {"chat_id": chat_id}
             )
 
-            if not data:
-                return False
-
-            return bool(
-                data.get(
-                    "admin_edit",
-                    False
+            if data:
+                return bool(
+                    data.get(
+                        "admin_edit",
+                        False
+                    )
                 )
-            )
+
+            return False
 
         except Exception:
             pass
@@ -675,9 +612,7 @@ def get_setting(chat_id):
             (chat_id,)
         ).fetchone()
 
-    return bool(
-        row[0]
-    ) if row else False
+    return bool(row[0]) if row else False
 
 
 def set_setting(
@@ -690,9 +625,7 @@ def set_setting(
         try:
 
             settings_col.update_one(
-                {
-                    "chat_id": chat_id
-                },
+                {"chat_id": chat_id},
                 {
                     "$set": {
                         "chat_id": chat_id,
@@ -714,7 +647,7 @@ def set_setting(
                 chat_id,
                 admin_edit
             )
-            VALUES(?,?)
+            VALUES(?, ?)
 
             ON CONFLICT(chat_id)
             DO UPDATE SET
@@ -863,9 +796,7 @@ def clear_local(chat_id):
         try:
 
             result = local_auth_col.delete_many(
-                {
-                    "chat_id": chat_id
-                }
+                {"chat_id": chat_id}
             )
 
             return result.deleted_count
@@ -897,9 +828,7 @@ def list_local(chat_id):
             return [
                 x["user_id"]
                 for x in local_auth_col.find(
-                    {
-                        "chat_id": chat_id
-                    },
+                    {"chat_id": chat_id},
                     {
                         "_id": 0,
                         "user_id": 1
@@ -943,9 +872,7 @@ def global_authed(user_id):
 
             return (
                 global_auth_col.find_one(
-                    {
-                        "user_id": user_id
-                    }
+                    {"user_id": user_id}
                 )
                 is not None
             )
@@ -974,9 +901,7 @@ def add_global(user_id):
         try:
 
             global_auth_col.update_one(
-                {
-                    "user_id": user_id
-                },
+                {"user_id": user_id},
                 {
                     "$set": {
                         "user_id": user_id
@@ -1010,9 +935,7 @@ def remove_global(user_id):
         try:
 
             result = global_auth_col.delete_one(
-                {
-                    "user_id": user_id
-                }
+                {"user_id": user_id}
             )
 
             return result.deleted_count
@@ -1109,11 +1032,7 @@ def target_user(message):
         and message.reply_to_message.from_user
     ):
 
-        return (
-            message.reply_to_message
-            .from_user
-            .id
-        )
+        return message.reply_to_message.from_user.id
 
     parts = (
         message.text or ""
@@ -1134,18 +1053,12 @@ def target_user(message):
 
 async def resolve_user(message):
 
-    target = target_user(
-        message
-    )
+    target = target_user(message)
 
     if target is None:
         return None
 
-    if isinstance(
-        target,
-        int
-    ):
-
+    if isinstance(target, int):
         return target
 
     try:
@@ -1162,7 +1075,7 @@ async def resolve_user(message):
 
 
 # ============================================================
-#                      DELETE MESSAGE
+#                     DELETE EDITED MESSAGE
 # ============================================================
 
 async def delete_quietly(message):
@@ -1326,59 +1239,68 @@ HELP_TEXT = """
 
 def start_buttons():
 
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
-                    url=(
-                        f"https://t.me/"
-                        f"{BOT_USERNAME}"
-                        f"?startgroup=true"
-                    )
-                )
-            ],
+    rows = []
 
-            [
-                InlineKeyboardButton(
-                    "💬 Oᴡɴᴇʀ",
-                    url=(
-                        f"https://t.me/"
-                        f"{OWNER_USERNAME}"
-                    )
-                ),
+    rows.append([
+        InlineKeyboardButton(
+            "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
+            url=(
+                f"https://t.me/"
+                f"{BOT_USERNAME}"
+                f"?startgroup=true"
+            )
+        )
+    ])
 
-                InlineKeyboardButton(
-                    "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
-                    url=(
-                        f"https://t.me/"
-                        f"{SUPPORT_USERNAME}"
-                    )
-                )
-            ],
+    contact_row = []
 
-            [
-                InlineKeyboardButton(
-                    "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
-                    callback_data="help"
+    if OWNER_USERNAME:
+
+        contact_row.append(
+            InlineKeyboardButton(
+                "💬 Oᴡɴᴇʀ",
+                url=(
+                    f"https://t.me/"
+                    f"{OWNER_USERNAME}"
                 )
-            ]
-        ]
-    )
+            )
+        )
+
+    if SUPPORT_USERNAME:
+
+        contact_row.append(
+            InlineKeyboardButton(
+                "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
+                url=(
+                    f"https://t.me/"
+                    f"{SUPPORT_USERNAME}"
+                )
+            )
+        )
+
+    if contact_row:
+        rows.append(contact_row)
+
+    rows.append([
+        InlineKeyboardButton(
+            "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
+            callback_data="help"
+        )
+    ])
+
+    return InlineKeyboardMarkup(rows)
 
 
 def home_buttons():
 
-    return InlineKeyboardMarkup(
+    return InlineKeyboardMarkup([
         [
-            [
-                InlineKeyboardButton(
-                    "🏠 Hᴏᴍᴇ",
-                    callback_data="home"
-                )
-            ]
+            InlineKeyboardButton(
+                "🏠 Hᴏᴍᴇ",
+                callback_data="home"
+            )
         ]
-    )
+    ])
 
 
 # ============================================================
@@ -1411,10 +1333,6 @@ async def start_cmd(
         bot
     )
 
-    # --------------------------------------------------------
-    # START IMAGE
-    # --------------------------------------------------------
-
     if (
         START_IMAGE
         and os.path.exists(
@@ -1439,14 +1357,10 @@ async def start_cmd(
                 e
             )
 
-    # --------------------------------------------------------
-    # FALLBACK TEXT
-    # --------------------------------------------------------
-
     await message.reply_text(
         text,
         reply_markup=start_buttons(),
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1469,7 +1383,7 @@ async def help_cmd(
     await message.reply_text(
         HELP_TEXT,
         reply_markup=home_buttons(),
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1490,7 +1404,7 @@ async def callbacks(
             await query.message.edit_text(
                 HELP_TEXT,
                 reply_markup=home_buttons(),
-                parse_mode="html"
+                parse_mode=ParseMode.HTML
             )
 
             await query.answer(
@@ -1511,7 +1425,7 @@ async def callbacks(
             await query.message.edit_text(
                 text,
                 reply_markup=start_buttons(),
-                parse_mode="html"
+                parse_mode=ParseMode.HTML
             )
 
             await query.answer(
@@ -1542,22 +1456,18 @@ async def auth_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
-
     if not is_group(message):
 
         return await message.reply_text(
             "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     uid = await resolve_user(
@@ -1569,7 +1479,7 @@ async def auth_cmd(
         return await message.reply_text(
             "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/auth USER_ID</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     add_local(
@@ -1583,7 +1493,7 @@ async def auth_cmd(
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"✅ Usᴇʀ: <code>{uid}</code>\n"
         "✨ <b>Aᴜᴛʜᴏʀɪᴢᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ.</b>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1603,14 +1513,14 @@ async def unauth_cmd(
 
         return await message.reply_text(
             "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     uid = await resolve_user(
@@ -1622,7 +1532,7 @@ async def unauth_cmd(
         return await message.reply_text(
             "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/unauth USER_ID</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     removed = remove_local(
@@ -1646,7 +1556,7 @@ async def unauth_cmd(
 
     await message.reply_text(
         text,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1666,14 +1576,14 @@ async def authusers_cmd(
 
         return await message.reply_text(
             "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     users = list_local(
@@ -1684,12 +1594,12 @@ async def authusers_cmd(
 
         return await message.reply_text(
             "📭 <b>Nᴏ Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "      👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
+        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
     )
 
@@ -1700,7 +1610,7 @@ async def authusers_cmd(
 
     await message.reply_text(
         text,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1720,14 +1630,14 @@ async def clear_auth_cmd(
 
         return await message.reply_text(
             "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     count = clear_local(
@@ -1736,7 +1646,7 @@ async def clear_auth_cmd(
 
     await message.reply_text(
         f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1756,7 +1666,7 @@ async def gauth_cmd(
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     uid = await resolve_user(
@@ -1768,17 +1678,15 @@ async def gauth_cmd(
         return await message.reply_text(
             "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/gauth USER_ID</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
-    add_global(
-        uid
-    )
+    add_global(uid)
 
     await message.reply_text(
         f"🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Aᴅᴅᴇᴅ:</b>\n"
         f"<code>{uid}</code>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1794,7 +1702,7 @@ async def gunauth_cmd(
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     uid = await resolve_user(
@@ -1806,30 +1714,25 @@ async def gunauth_cmd(
         return await message.reply_text(
             "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/gunauth USER_ID</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     removed = remove_global(
         uid
     )
 
-    if removed:
-
-        text = (
-            f"✅ <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ:</b>\n"
-            f"<code>{uid}</code>"
-        )
-
-    else:
-
-        text = (
-            f"ℹ️ <b>Usᴇʀ Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
-            f"<code>{uid}</code>"
-        )
+    text = (
+        f"✅ <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ:</b>\n"
+        f"<code>{uid}</code>"
+        if removed
+        else
+        f"ℹ️ <b>Usᴇʀ Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
+        f"<code>{uid}</code>"
+    )
 
     await message.reply_text(
         text,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1845,7 +1748,7 @@ async def gusers_cmd(
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     users = list_global()
@@ -1854,7 +1757,7 @@ async def gusers_cmd(
 
         return await message.reply_text(
             "📭 <b>Nᴏ Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     text = (
@@ -1868,7 +1771,7 @@ async def gusers_cmd(
 
     await message.reply_text(
         text,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1884,19 +1787,19 @@ async def clear_global_cmd(
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     count = clear_global()
 
     await message.reply_text(
         f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
 # ============================================================
-#                        ADMIN EDIT
+#                       ADMIN EDIT
 # ============================================================
 
 @app.on_message(
@@ -1911,14 +1814,14 @@ async def adminedit_cmd(
 
         return await message.reply_text(
             "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
             "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     parts = (
@@ -1928,17 +1831,12 @@ async def adminedit_cmd(
     if (
         len(parts) < 2
         or parts[1].lower()
-        not in (
-            "on",
-            "off"
-        )
+        not in ("on", "off")
     ):
 
         current = (
             "🟢 Oɴ"
-            if get_setting(
-                message.chat.id
-            )
+            if get_setting(message.chat.id)
             else "🔴 Oғғ"
         )
 
@@ -1947,7 +1845,7 @@ async def adminedit_cmd(
             f"Cᴜʀʀᴇɴᴛ: <b>{current}</b>\n\n"
             "<code>/adminedit on</code>\n"
             "<code>/adminedit off</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     enabled = (
@@ -1964,7 +1862,7 @@ async def adminedit_cmd(
         "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>\n\n"
         f"Sᴛᴀᴛᴜs: "
         f"<b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -1972,9 +1870,8 @@ async def adminedit_cmd(
 #                       EDIT GUARDIAN
 # ============================================================
 
-# IMPORTANT:
-# filters.group covers BOTH normal groups and supergroups.
-# filters.supergroup DOES NOT EXIST in Pyrogram.
+# filters.group handles BOTH groups and supergroups.
+# Do NOT use filters.supergroup.
 
 @app.on_edited_message(
     filters.group
@@ -1987,20 +1884,18 @@ async def edited_guard(
     if not message.from_user:
         return
 
-    # Ignore bot edits
     if message.from_user.is_bot:
         return
 
     uid = message.from_user.id
 
-    # Local authorized user
+    # Authorized users are always allowed.
     if local_authed(
         message.chat.id,
         uid
     ):
         return
 
-    # Global authorized user
     if global_authed(uid):
         return
 
@@ -2017,25 +1912,18 @@ async def edited_guard(
 
         status = None
 
-    # --------------------------------------------------------
-    # ADMIN / OWNER
-    # --------------------------------------------------------
-
+    # Admin / Owner
     if status in (
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.OWNER
     ):
 
-        # Admin edits are ignored by default.
-        # /adminedit on = delete admin edits.
+        # Default OFF.
+        # ON means delete admin edits.
         if not get_setting(
             message.chat.id
         ):
             return
-
-    # --------------------------------------------------------
-    # NORMAL USER
-    # --------------------------------------------------------
 
     await delete_quietly(
         message
@@ -2058,7 +1946,7 @@ async def broadcast_cmd(
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     user_ids = all_user_ids()
@@ -2067,20 +1955,20 @@ async def broadcast_cmd(
 
         return await message.reply_text(
             "📭 <b>Nᴏ Usᴇʀs Fᴏᴜɴᴅ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     # ========================================================
-    # REPLY BROADCAST
+    # BROADCAST REPLIED MESSAGE
     # ========================================================
 
     if message.reply_to_message:
 
         progress = await message.reply_text(
-            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀʈ𝛆ɗ...</b>\n\n"
+            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀʀᴛᴇᴅ...</b>\n\n"
             f"👥 Usᴇʀs: <code>{len(user_ids)}</code>\n"
             "⏳ <b>Pʟᴇᴀsᴇ Wᴀɪᴛ...</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
         sent = 0
@@ -2152,8 +2040,8 @@ async def broadcast_cmd(
             f"✅ Sᴇɴᴛ: <code>{sent}</code>\n"
             f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
             f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
-            "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛ𝛆ɗ.</b>",
-            parse_mode="html"
+            "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛᴇᴅ.</b>",
+            parse_mode=ParseMode.HTML
         )
 
         return
@@ -2171,11 +2059,11 @@ async def broadcast_cmd(
     if len(parts) < 2:
 
         return await message.reply_text(
-            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Uѕᴧɢ𝛆</b>\n\n"
+            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Usᴀɢᴇ</b>\n\n"
             "<code>/broadcast Hello ❤️</code>\n\n"
             "Oʀ Rᴇᴘʟʏ Tᴏ A Mᴇssᴀɢᴇ:\n"
             "<code>/broadcast</code>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     text = parts[1].strip()
@@ -2184,14 +2072,14 @@ async def broadcast_cmd(
 
         return await message.reply_text(
             "❌ <b>Bʀᴏᴀᴅᴄᴀsᴛ Mᴇssᴀɢᴇ Eᴍᴘᴛʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     progress = await message.reply_text(
-        "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀʈ𝛆ɗ...</b>\n\n"
+        "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀʀᴛᴇᴅ...</b>\n\n"
         f"👥 Usᴇʀs: <code>{len(user_ids)}</code>\n"
         "⏳ <b>Pʟᴇᴀsᴇ Wᴀɪᴛ...</b>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
     sent = 0
@@ -2202,6 +2090,8 @@ async def broadcast_cmd(
 
         try:
 
+            # User broadcast is plain text.
+            # No HTML parsing here.
             await app.send_message(
                 uid,
                 text
@@ -2265,8 +2155,8 @@ async def broadcast_cmd(
         f"✅ Sᴇɴᴛ: <code>{sent}</code>\n"
         f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
         f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
-        "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛ𝛆ɗ.</b>",
-        parse_mode="html"
+        "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛᴇᴅ.</b>",
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -2286,7 +2176,7 @@ async def broadcast_stats_cmd(
 
         return await message.reply_text(
             "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     await message.reply_text(
@@ -2299,7 +2189,7 @@ async def broadcast_stats_cmd(
         f"<code>{get_stat('starts')}</code>\n"
         f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
         f"<code>{get_stat('deleted_edits')}</code>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -2319,7 +2209,7 @@ async def stats_cmd(
 
         return await message.reply_text(
             "❌ <b>Aᴅᴍɪɴ / Oᴡɴᴇʀ Oɴʟʏ.</b>",
-            parse_mode="html"
+            parse_mode=ParseMode.HTML
         )
 
     text = (
@@ -2343,7 +2233,7 @@ async def stats_cmd(
 
     await message.reply_text(
         text,
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -2369,7 +2259,7 @@ async def id_cmd(
     await message.reply_text(
         "🆔 <b>Yᴏᴜʀ Tᴇʟᴇɢʀᴀᴍ ID</b>\n\n"
         f"<code>{message.from_user.id}</code>",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -2395,15 +2285,11 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "Broadcast: ENABLED"
-    )
-
-    log.info(
-        "Owner/Admin Auth: ENABLED"
-    )
-
-    log.info(
         "Edit Guardian: ENABLED"
+    )
+
+    log.info(
+        "Broadcast: ENABLED"
     )
 
     log.info(
