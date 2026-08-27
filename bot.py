@@ -1,8 +1,9 @@
 import os
-import sqlite3
+import asyncio
 import logging
-from contextlib import closing
+import time
 
+from pymongo import MongoClient
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.types import (
@@ -14,7 +15,7 @@ from pyrogram.errors import RPCError, FloodWait
 
 
 # ============================================================
-# KIRTI GUARDIAN BOT [V2]
+#                    KIRTI GUARDIAN BOT
 # ============================================================
 
 API_ID = int(os.getenv("API_ID", "0"))
@@ -22,8 +23,16 @@ API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-START_IMAGE = os.getenv("START_IMAGE", "").strip() or "start.jpg"
-DB_PATH = os.getenv("DB_PATH", "guardian.db")
+MONGO_URI = os.getenv("MONGO_URI", "")
+MONGO_DB_NAME = os.getenv(
+    "MONGO_DB_NAME",
+    "kirti_guardian"
+)
+
+START_IMAGE = os.getenv(
+    "START_IMAGE",
+    "start.jpg"
+)
 
 BOT_USERNAME = os.getenv(
     "BOT_USERNAME",
@@ -32,17 +41,17 @@ BOT_USERNAME = os.getenv(
 
 OWNER_USERNAME = os.getenv(
     "OWNER_USERNAME",
-    "Kirti_Updates"
+    ""
 ).lstrip("@")
 
 SUPPORT_USERNAME = os.getenv(
     "SUPPORT_USERNAME",
-    "Kirti_Updates"
+    ""
 ).lstrip("@")
 
 
 # ============================================================
-# CHECK ENV
+#                       CHECK CONFIG
 # ============================================================
 
 if not API_ID:
@@ -57,21 +66,24 @@ if not BOT_TOKEN:
 if not OWNER_ID:
     raise RuntimeError("OWNER_ID is missing.")
 
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI is missing.")
+
 
 # ============================================================
-# LOGGING
+#                         LOGGING
 # ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-log = logging.getLogger("KirtiGuardianBot")
+log = logging.getLogger("KirtiGuardian")
 
 
 # ============================================================
-# CLIENT
+#                        PYROGRAM
 # ============================================================
 
 app = Client(
@@ -84,123 +96,133 @@ app = Client(
 
 
 # ============================================================
-# DATABASE
+#                         MONGODB
 # ============================================================
 
-def db():
-    conn = sqlite3.connect(
-        DB_PATH,
-        timeout=30
-    )
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+mongo = MongoClient(
+    MONGO_URI,
+    serverSelectionTimeoutMS=10000
+)
 
+mongo.admin.command("ping")
 
-def init_db():
+db = mongo[MONGO_DB_NAME]
 
-    with closing(db()) as con:
-
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS local_auth (
-                chat_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                PRIMARY KEY(chat_id, user_id)
-            )
-        """)
-
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS global_auth (
-                user_id INTEGER PRIMARY KEY
-            )
-        """)
-
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                chat_id INTEGER PRIMARY KEY,
-                admin_edit INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS stats (
-                key TEXT PRIMARY KEY,
-                value INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-
-        con.commit()
+users_col = db["users"]
+local_auth_col = db["local_auth"]
+global_auth_col = db["global_auth"]
+settings_col = db["settings"]
+stats_col = db["stats"]
 
 
 # ============================================================
-# STATS
+#                          INDEXES
+# ============================================================
+
+users_col.create_index(
+    "user_id",
+    unique=True
+)
+
+local_auth_col.create_index(
+    [
+        ("chat_id", 1),
+        ("user_id", 1)
+    ],
+    unique=True
+)
+
+global_auth_col.create_index(
+    "user_id",
+    unique=True
+)
+
+settings_col.create_index(
+    "chat_id",
+    unique=True
+)
+
+
+# ============================================================
+#                         STATISTICS
 # ============================================================
 
 def stat_inc(key, amount=1):
 
-    with closing(db()) as con:
-
-        con.execute("""
-            INSERT INTO stats(key, value)
-            VALUES(?, ?)
-
-            ON CONFLICT(key)
-            DO UPDATE SET value = value + excluded.value
-        """, (key, amount))
-
-        con.commit()
+    stats_col.update_one(
+        {"key": key},
+        {
+            "$inc": {
+                "value": amount
+            }
+        },
+        upsert=True
+    )
 
 
-def get_stats():
+def get_stat(key):
 
-    with closing(db()) as con:
+    data = stats_col.find_one(
+        {"key": key}
+    )
 
-        rows = con.execute(
-            "SELECT key, value FROM stats"
-        ).fetchall()
+    if not data:
+        return 0
 
-    return dict(rows)
-
-
-# ============================================================
-# SETTINGS
-# ============================================================
-
-def get_setting(chat_id):
-
-    with closing(db()) as con:
-
-        row = con.execute(
-            """
-            SELECT admin_edit
-            FROM settings
-            WHERE chat_id=?
-            """,
-            (chat_id,)
-        ).fetchone()
-
-    return bool(row[0]) if row else False
-
-
-def set_setting(chat_id, enabled):
-
-    with closing(db()) as con:
-
-        con.execute("""
-            INSERT INTO settings(chat_id, admin_edit)
-            VALUES(?, ?)
-
-            ON CONFLICT(chat_id)
-            DO UPDATE SET admin_edit=excluded.admin_edit
-        """, (
-            chat_id,
-            int(enabled)
-        ))
-
-        con.commit()
+    return int(
+        data.get("value", 0)
+    )
 
 
 # ============================================================
-# GROUP CHECK — FIXED
+#                         SAVE USER
+# ============================================================
+
+def save_user(user):
+
+    if not user:
+        return
+
+    try:
+
+        users_col.update_one(
+            {
+                "user_id": user.id
+            },
+            {
+                "$set": {
+                    "user_id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "is_bot": user.is_bot,
+                    "updated_at": time.time()
+                }
+            },
+            upsert=True
+        )
+
+    except Exception as e:
+
+        log.warning(
+            "User save error: %s",
+            e
+        )
+
+
+def save_message_user(message):
+
+    if (
+        message
+        and message.from_user
+    ):
+        save_user(
+            message.from_user
+        )
+
+
+# ============================================================
+#                         GROUP CHECK
 # ============================================================
 
 def is_group(message):
@@ -213,16 +235,18 @@ def is_group(message):
 
     return message.chat.type in (
         ChatType.GROUP,
-        ChatType.SUPERGROUP,
+        ChatType.SUPERGROUP
     )
 
 
 # ============================================================
-# ADMIN CHECK — FIXED
-# OWNER + ADMIN
+#                         ADMIN CHECK
 # ============================================================
 
-async def is_admin(message, user_id=None):
+async def is_admin(
+    message,
+    user_id=None
+):
 
     if not message:
         return False
@@ -234,11 +258,9 @@ async def is_admin(message, user_id=None):
 
         user_id = message.from_user.id
 
-    # Bot owner
     if user_id == OWNER_ID:
         return True
 
-    # Group / Supergroup
     if not is_group(message):
         return False
 
@@ -251,22 +273,17 @@ async def is_admin(message, user_id=None):
 
         return member.status in (
             ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER,
+            ChatMemberStatus.OWNER
         )
 
     except RPCError as e:
 
         log.warning(
-            "Admin check failed: %s",
+            "Admin check error: %s",
             e
         )
 
         return False
-
-
-async def admin_only(message):
-
-    return await is_admin(message)
 
 
 async def owner_only(message):
@@ -278,199 +295,229 @@ async def owner_only(message):
 
 
 # ============================================================
-# LOCAL AUTH
+#                          SETTINGS
 # ============================================================
 
-def local_authed(chat_id, user_id):
+def get_setting(chat_id):
 
-    with closing(db()) as con:
+    data = settings_col.find_one(
+        {
+            "chat_id": chat_id
+        }
+    )
 
-        row = con.execute(
-            """
-            SELECT 1
-            FROM local_auth
-            WHERE chat_id=?
-            AND user_id=?
-            """,
-            (chat_id, user_id)
-        ).fetchone()
+    if not data:
+        return False
 
-    return row is not None
-
-
-def add_local(chat_id, user_id):
-
-    with closing(db()) as con:
-
-        con.execute(
-            """
-            INSERT OR IGNORE INTO local_auth(
-                chat_id,
-                user_id
-            )
-            VALUES(?, ?)
-            """,
-            (chat_id, user_id)
+    return bool(
+        data.get(
+            "admin_edit",
+            False
         )
+    )
 
-        con.commit()
+
+def set_setting(
+    chat_id,
+    enabled
+):
+
+    settings_col.update_one(
+        {
+            "chat_id": chat_id
+        },
+        {
+            "$set": {
+                "chat_id": chat_id,
+                "admin_edit": bool(enabled)
+            }
+        },
+        upsert=True
+    )
 
 
-def remove_local(chat_id, user_id):
+# ============================================================
+#                         LOCAL AUTH
+# ============================================================
 
-    with closing(db()) as con:
+def local_authed(
+    chat_id,
+    user_id
+):
 
-        cur = con.execute(
-            """
-            DELETE FROM local_auth
-            WHERE chat_id=?
-            AND user_id=?
-            """,
-            (chat_id, user_id)
+    return (
+        local_auth_col.find_one(
+            {
+                "chat_id": chat_id,
+                "user_id": user_id
+            }
         )
+        is not None
+    )
 
-        con.commit()
 
-        return cur.rowcount
+def add_local(
+    chat_id,
+    user_id
+):
+
+    local_auth_col.update_one(
+        {
+            "chat_id": chat_id,
+            "user_id": user_id
+        },
+        {
+            "$set": {
+                "chat_id": chat_id,
+                "user_id": user_id
+            }
+        },
+        upsert=True
+    )
+
+
+def remove_local(
+    chat_id,
+    user_id
+):
+
+    result = local_auth_col.delete_one(
+        {
+            "chat_id": chat_id,
+            "user_id": user_id
+        }
+    )
+
+    return result.deleted_count
 
 
 def clear_local(chat_id):
 
-    with closing(db()) as con:
+    result = local_auth_col.delete_many(
+        {
+            "chat_id": chat_id
+        }
+    )
 
-        cur = con.execute(
-            "DELETE FROM local_auth WHERE chat_id=?",
-            (chat_id,)
-        )
-
-        con.commit()
-
-        return cur.rowcount
+    return result.deleted_count
 
 
 def list_local(chat_id):
 
-    with closing(db()) as con:
-
-        rows = con.execute(
-            """
-            SELECT user_id
-            FROM local_auth
-            WHERE chat_id=?
-            ORDER BY user_id
-            """,
-            (chat_id,)
-        ).fetchall()
-
-    return [row[0] for row in rows]
+    return [
+        x["user_id"]
+        for x in local_auth_col.find(
+            {
+                "chat_id": chat_id
+            },
+            {
+                "_id": 0,
+                "user_id": 1
+            }
+        ).sort(
+            "user_id",
+            1
+        )
+    ]
 
 
 # ============================================================
-# GLOBAL AUTH
+#                         GLOBAL AUTH
 # ============================================================
 
 def global_authed(user_id):
 
-    with closing(db()) as con:
-
-        row = con.execute(
-            """
-            SELECT 1
-            FROM global_auth
-            WHERE user_id=?
-            """,
-            (user_id,)
-        ).fetchone()
-
-    return row is not None
+    return (
+        global_auth_col.find_one(
+            {
+                "user_id": user_id
+            }
+        )
+        is not None
+    )
 
 
 def add_global(user_id):
 
-    with closing(db()) as con:
-
-        con.execute(
-            """
-            INSERT OR IGNORE INTO global_auth(user_id)
-            VALUES(?)
-            """,
-            (user_id,)
-        )
-
-        con.commit()
+    global_auth_col.update_one(
+        {
+            "user_id": user_id
+        },
+        {
+            "$set": {
+                "user_id": user_id
+            }
+        },
+        upsert=True
+    )
 
 
 def remove_global(user_id):
 
-    with closing(db()) as con:
+    result = global_auth_col.delete_one(
+        {
+            "user_id": user_id
+        }
+    )
 
-        cur = con.execute(
-            """
-            DELETE FROM global_auth
-            WHERE user_id=?
-            """,
-            (user_id,)
-        )
-
-        con.commit()
-
-        return cur.rowcount
+    return result.deleted_count
 
 
 def clear_global():
 
-    with closing(db()) as con:
+    result = global_auth_col.delete_many({})
 
-        cur = con.execute(
-            "DELETE FROM global_auth"
-        )
-
-        con.commit()
-
-        return cur.rowcount
+    return result.deleted_count
 
 
 def list_global():
 
-    with closing(db()) as con:
-
-        rows = con.execute(
-            """
-            SELECT user_id
-            FROM global_auth
-            ORDER BY user_id
-            """
-        ).fetchall()
-
-    return [row[0] for row in rows]
+    return [
+        x["user_id"]
+        for x in global_auth_col.find(
+            {},
+            {
+                "_id": 0,
+                "user_id": 1
+            }
+        ).sort(
+            "user_id",
+            1
+        )
+    ]
 
 
 # ============================================================
-# USER RESOLVER
+#                         USER RESOLVER
 # ============================================================
 
 def target_user(message):
 
-    # Reply target
     if (
         message.reply_to_message
         and message.reply_to_message.from_user
     ):
-        return message.reply_to_message.from_user.id
+        return (
+            message.reply_to_message
+            .from_user
+            .id
+        )
 
-    parts = (message.text or "").split(
+    parts = (
+        message.text or ""
+    ).split(
         maxsplit=1
     )
 
     if len(parts) != 2:
         return None
 
-    raw = parts[1].strip()
+    value = parts[1].strip()
 
-    if raw.isdigit():
-        return int(raw)
+    if value.isdigit():
+        return int(value)
 
-    return raw.lstrip("@")
+    return value.lstrip("@")
 
 
 async def resolve_user(message):
@@ -485,16 +532,19 @@ async def resolve_user(message):
 
     try:
 
-        user = await app.get_users(target)
+        user = await app.get_users(
+            target
+        )
 
         return user.id
 
     except RPCError:
+
         return None
 
 
 # ============================================================
-# DELETE HELPER
+#                       DELETE EDIT
 # ============================================================
 
 async def delete_quietly(message):
@@ -503,24 +553,21 @@ async def delete_quietly(message):
 
         await message.delete()
 
-        stat_inc("deleted_edits")
+        stat_inc(
+            "deleted_edits"
+        )
 
         return True
 
     except FloodWait as e:
 
-        await app.sleep(e.value)
+        await asyncio.sleep(
+            e.value
+        )
 
     except RPCError as e:
 
         log.debug(
-            "Delete RPC error: %s",
-            e
-        )
-
-    except Exception as e:
-
-        log.warning(
             "Delete error: %s",
             e
         )
@@ -529,139 +576,192 @@ async def delete_quietly(message):
 
 
 # ============================================================
-# START TEXT
+#                         START TEXT
 # ============================================================
 
-START_TEXT = """
+def start_text(
+    user,
+    bot
+):
+
+    user_name = (
+        user.first_name
+        or "User"
+    )
+
+    bot_name = (
+        bot.first_name
+        or "Kirti Guardian"
+    )
+
+    user_mention = (
+        f'<a href="tg://user?id={user.id}">'
+        f'{user_name}</a>'
+    )
+
+    bot_mention = (
+        f'<a href="https://t.me/'
+        f'{BOT_USERNAME}">'
+        f'{bot_name}</a>'
+    )
+
+    return f"""
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
-      🛡️ <b>𝐊𝐈𝐑𝐓𝐈 𝐆𝐔𝐀𝐑𝐃𝐈𝐀𝐍</b>
-          <i>𝐁𝐎𝐓 [𝐕𝟐]</i>
+      🛡️ <b>Ҡɪʀᴛɪ Gᴜᴀʀᴅɪᴀɴ</b>
+          <i>Bᴏᴛ V𝟸</i>
 ╰━━━━━━━━━━━━━━━━━━━━━━╯
 
-👋 <b>𝐖𝐄𝐋𝐂𝐎𝐌𝐄 — 𝐁𝐀𝐃𝐍𝐀𝐌 !! 🇨🇦</b>
+👋 <b>Hᴇʟʟᴏ {user_mention} ❤️</b>
 
-🤖 <b>𝐈'𝐌 𝐊𝐈𝐑𝐓𝐈 𝐆𝐔𝐀𝐑𝐃𝐈𝐀𝐍</b>
+🤖 <b>Wᴇʟᴄᴏᴍᴇ Tᴏ
+{bot_mention}</b>
 
-🚨 <b>𝐈 𝐂𝐀𝐍 𝐀𝐔𝐓𝐎-𝐃𝐄𝐋𝐄𝐓𝐄</b>
-<b>𝐄𝐃𝐈𝐓𝐄𝐃 𝐌𝐄𝐒𝐒𝐀𝐆𝐄𝐒</b>
-<b>(𝐓𝐄𝐗𝐓 & 𝐌𝐄𝐃𝐈𝐀)</b>
+🚨 <b>I Cᴀɴ Aᴜᴛᴏ-Dᴇʟᴇᴛᴇ
+Eᴅɪᴛᴇᴅ Mᴇssᴀɢᴇs</b>
 
-🔔 <b>𝐌𝐄𝐌𝐁𝐄𝐑𝐒 𝐀𝐑𝐄 𝐍𝐎𝐓𝐈𝐅𝐈𝐄𝐃</b>
-<b>𝐖𝐇𝐄𝐍 𝐀 𝐌𝐄𝐒𝐒𝐀𝐆𝐄 𝐈𝐒 𝐑𝐄𝐌𝐎𝐕𝐄𝐃.</b>
+🛡️ <b>I'ʟʟ Kᴇᴇᴘ Yᴏᴜʀ
+Gʀᴏᴜᴘ Cʟᴇᴀɴ & Sᴀғᴇ.</b>
 
-👍 <b>𝐓𝐄𝐋𝐄𝐆𝐑𝐀𝐌 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍 𝐄𝐃𝐈𝐓𝐒</b>
-<b>𝐀𝐑𝐄 𝐈𝐆𝐍𝐎𝐑𝐄𝐃.</b>
+⭐ <b>Aᴅᴅ Mᴇ Tᴏ Yᴏᴜʀ Gʀᴏᴜᴘ</b>
 
-🛡️ <b>𝐈'𝐋𝐋 𝐊𝐄𝐄𝐏 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏</b>
-<b>𝐂𝐋𝐄𝐀𝐍 & 𝐒𝐀𝐅𝐄.</b>
-
-⭐ <b>𝐀𝐃𝐃 𝐌𝐄 𝐓𝐎 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏</b>
-<b>𝐀𝐍𝐃 𝐆𝐈𝐕𝐄 𝐌𝐄 𝐃𝐄𝐋𝐄𝐓𝐄 𝐌𝐄𝐒𝐒𝐀𝐆𝐄𝐒</b>
-<b>𝐏𝐄𝐑𝐌𝐈𝐒𝐒𝐈𝐎𝐍.</b>
+<b>Gɪᴠᴇ Mᴇ Dᴇʟᴇᴛᴇ
+Mᴇssᴀɢᴇs Pᴇʀᴍɪssɪᴏɴ.</b>
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-💎 <b>𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐊𝐈𝐑𝐓𝐈 𝐁𝐎𝐓𝐒</b>
-❤️ <i>𝐌𝐀𝐃𝐄 𝐅𝐎𝐑 𝐓𝐄𝐋𝐄𝐆𝐑𝐀𝐌</i>
+💎 <b>Pᴏᴡᴇʀᴇᴅ Bʏ {bot_mention}</b>
+❤️ <i>Mᴀᴅᴇ Fᴏʀ Tᴇʟᴇɢʀᴀᴍ</i>
 """
 
 
 # ============================================================
-# HELP
+#                            HELP
 # ============================================================
 
 HELP_TEXT = """
 ╭━━━━━━━━━━━━━━━━━━━━━━╮
-      📚 <b>𝐇𝐄𝐋𝐏 & 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒</b>
+       📚 <b>Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs</b>
 ╰━━━━━━━━━━━━━━━━━━━━━━╯
 
-👑 <b>𝐋𝐎𝐂𝐀𝐋 𝐀𝐔𝐓𝐇</b>
-<i>𝐆𝐫𝐨𝐮𝐩 𝐎𝐰𝐧𝐞𝐫 / 𝐀𝐝𝐦𝐢𝐧 𝐎𝐧𝐥𝐲</i>
+👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>
+<i>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ</i>
 
-➤ <code>/auth</code> — 𝐀𝐮𝐭𝐡𝐨𝐫𝐢𝐳𝐞 𝐔𝐬𝐞𝐫
-➤ <code>/unauth</code> — 𝐑𝐞𝐦𝐨𝐯𝐞 𝐀𝐮𝐭𝐡
-➤ <code>/authusers</code> — 𝐀𝐮𝐭𝐡 𝐔𝐬𝐞𝐫𝐬
-➤ <code>/clearauthusers</code> — 𝐂𝐥𝐞𝐚𝐫 𝐀𝐥𝐥
+➤ <code>/auth</code> — Aᴜᴛʜᴏʀɪᴢᴇ
+➤ <code>/unauth</code> — Rᴇᴍᴏᴠᴇ
+➤ <code>/authusers</code> — Lɪsᴛ
+➤ <code>/clearauthusers</code> — Cʟᴇᴀʀ Aʟʟ
 
-🌐 <b>𝐆𝐋𝐎𝐁𝐀𝐋 𝐀𝐔𝐓𝐇</b>
-<i>𝐁𝐨𝐭 𝐎𝐰𝐧𝐞𝐫 𝐎𝐧𝐥𝐲</i>
+🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ</b>
+<i>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ</i>
 
-➤ <code>/gauth</code> — 𝐆𝐥𝐨𝐛𝐚𝐥 𝐀𝐮𝐭𝐡
-➤ <code>/gunauth</code> — 𝐑𝐞𝐦𝐨𝐯𝐞 𝐆𝐥𝐨𝐛𝐚𝐥
-➤ <code>/gusers</code> — 𝐆𝐥𝐨𝐛𝐚𝐥 𝐔𝐬𝐞𝐫𝐬
-➤ <code>/cleargusers</code> — 𝐂𝐥𝐞𝐚𝐫 𝐀𝐥𝐥
+➤ <code>/gauth</code> — Gʟᴏʙᴀʟ Aᴜᴛʜ
+➤ <code>/gunauth</code> — Rᴇᴍᴏᴠᴇ
+➤ <code>/gusers</code> — Lɪsᴛ
+➤ <code>/cleargusers</code> — Cʟᴇᴀʀ Aʟʟ
 
-🛡️ <b>𝐄𝐃𝐈𝐓 𝐏𝐑𝐎𝐓𝐄𝐂𝐓𝐈𝐎𝐍</b>
+📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>
+<i>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ</i>
+
+➤ <code>/broadcast MESSAGE</code>
+
+➤ Rᴇᴘʟʏ Tᴏ Aɴʏ Mᴇssᴀɢᴇ:
+<code>/broadcast</code>
+
+➤ <code>/broadcast_stats</code>
+
+🛡️ <b>Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>
 
 ➤ <code>/adminedit on</code>
-   𝐄𝐧𝐚𝐛𝐥𝐞 𝐀𝐝𝐦𝐢𝐧 𝐄𝐝𝐢𝐭 𝐃𝐞𝐥𝐞𝐭𝐢𝐨𝐧
-
 ➤ <code>/adminedit off</code>
-   𝐃𝐢𝐬𝐚𝐛𝐥𝐞 𝐀𝐝𝐦𝐢𝐧 𝐄𝐝𝐢𝐭 𝐃𝐞𝐥𝐞𝐭𝐢𝐨𝐧
 
-📊 <b>𝐎𝐓𝐇𝐄𝐑</b>
+📊 <b>Oᴛʜᴇʀ</b>
 
-➤ <code>/start</code> — 𝐒𝐭𝐚𝐫𝐭
-➤ <code>/stats</code> — 𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬
-➤ <code>/id</code> — 𝐓𝐞𝐥𝐞𝐠𝐫𝐚𝐦 𝐈𝐃
+➤ <code>/start</code>
+➤ <code>/help</code>
+➤ <code>/stats</code>
+➤ <code>/id</code>
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
-⚡ <b>𝐆𝐈𝐕𝐄 𝐌𝐄 𝐃𝐄𝐋𝐄𝐓𝐄 𝐌𝐄𝐒𝐒𝐀𝐆𝐄𝐒</b>
-<b>𝐏𝐄𝐑𝐌𝐈𝐒𝐒𝐈𝐎𝐍 𝐓𝐎 𝐏𝐑𝐎𝐓𝐄𝐂𝐓 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏.</b>
+⚡ <b>Gɪᴠᴇ Mᴇ Dᴇʟᴇᴛᴇ
+Mᴇssᴀɢᴇs Pᴇʀᴍɪssɪᴏɴ</b>
 """
 
 
 # ============================================================
-# BUTTONS
+#                           BUTTONS
 # ============================================================
 
 def start_buttons():
 
-    return InlineKeyboardMarkup(
+    buttons = []
+
+    buttons.append(
         [
-            [
-                InlineKeyboardButton(
-                    "✚ 𝐀𝐃𝐃 𝐌𝐄 𝐈𝐍 𝐘𝐎𝐔𝐑 𝐆𝐑𝐎𝐔𝐏 ✚",
-                    url=(
-                        f"https://t.me/"
-                        f"{BOT_USERNAME}"
-                        f"?startgroup=true"
-                    )
+            InlineKeyboardButton(
+                "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
+                url=(
+                    f"https://t.me/"
+                    f"{BOT_USERNAME}"
+                    f"?startgroup=true"
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    "💬 𝐎𝐖𝐍𝐄𝐑",
-                    url=f"https://t.me/{OWNER_USERNAME}"
-                ),
-                InlineKeyboardButton(
-                    "👨‍💼 𝐒𝐔𝐏𝐏𝐎𝐑𝐓",
-                    url=f"https://t.me/{SUPPORT_USERNAME}"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📚 𝐇𝐄𝐋𝐏 & 𝐂𝐎𝐌𝐌𝐀𝐍𝐃𝐒",
-                    callback_data="help"
-                )
-            ]
+            )
         ]
     )
 
+    owner_row = []
 
-def navigation_buttons():
+    if OWNER_USERNAME:
+
+        owner_row.append(
+            InlineKeyboardButton(
+                "💬 Oᴡɴᴇʀ",
+                url=(
+                    f"https://t.me/"
+                    f"{OWNER_USERNAME}"
+                )
+            )
+        )
+
+    if SUPPORT_USERNAME:
+
+        owner_row.append(
+            InlineKeyboardButton(
+                "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
+                url=(
+                    f"https://t.me/"
+                    f"{SUPPORT_USERNAME}"
+                )
+            )
+        )
+
+    if owner_row:
+        buttons.append(
+            owner_row
+        )
+
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
+                callback_data="help"
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(
+        buttons
+    )
+
+
+def home_buttons():
 
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "🏠 𝐇𝐎𝐌𝐄",
+                    "🏠 Hᴏᴍᴇ",
                     callback_data="home"
-                ),
-                InlineKeyboardButton(
-                    "🛡️ 𝐒𝐓𝐀𝐓𝐔𝐒",
-                    callback_data="status"
                 )
             ]
         ]
@@ -669,163 +769,122 @@ def navigation_buttons():
 
 
 # ============================================================
-# START
+#                            START
 # ============================================================
 
-@app.on_message(filters.command("start"))
-async def start_cmd(_, message: Message):
+@app.on_message(
+    filters.command("start")
+)
+async def start_cmd(
+    _,
+    message: Message
+):
 
-    stat_inc("starts")
+    if not message.from_user:
+        return
 
-    if START_IMAGE:
+    save_message_user(
+        message
+    )
 
-        try:
+    stat_inc(
+        "starts"
+    )
+
+    bot = await app.get_me()
+
+    text = start_text(
+        message.from_user,
+        bot
+    )
+
+    try:
+
+        if START_IMAGE:
 
             await message.reply_photo(
                 photo=START_IMAGE,
-                caption=START_TEXT,
+                caption=text,
                 reply_markup=start_buttons()
             )
 
             return
 
-        except Exception as e:
+    except Exception as e:
 
-            log.warning(
-                "Start image failed: %s",
-                e
-            )
+        log.warning(
+            "Start image failed: %s",
+            e
+        )
 
     await message.reply_text(
-        START_TEXT,
+        text,
         reply_markup=start_buttons()
     )
 
 
 # ============================================================
-# HELP
+#                             HELP
 # ============================================================
 
-@app.on_message(filters.command("help"))
-async def help_cmd(_, message: Message):
+@app.on_message(
+    filters.command("help")
+)
+async def help_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     await message.reply_text(
         HELP_TEXT,
-        reply_markup=navigation_buttons(),
+        reply_markup=home_buttons(),
         disable_web_page_preview=True
     )
 
 
 # ============================================================
-# CALLBACKS
+#                          CALLBACKS
 # ============================================================
 
 @app.on_callback_query()
-async def callbacks(_, query):
+async def callbacks(
+    _,
+    query
+):
 
     try:
 
-        # ----------------------------------------------------
-        # HELP
-        # ----------------------------------------------------
-
         if query.data == "help":
 
-            if query.message.photo:
-
-                await query.message.edit_caption(
-                    caption=HELP_TEXT,
-                    reply_markup=navigation_buttons()
-                )
-
-            else:
-
-                await query.message.edit_text(
-                    HELP_TEXT,
-                    reply_markup=navigation_buttons()
-                )
+            await query.message.edit_text(
+                HELP_TEXT,
+                reply_markup=home_buttons()
+            )
 
             await query.answer()
-            return
 
-        # ----------------------------------------------------
-        # HOME
-        # ----------------------------------------------------
+            return
 
         if query.data == "home":
 
-            if query.message.photo:
+            bot = await app.get_me()
 
-                await query.message.edit_caption(
-                    caption=START_TEXT,
-                    reply_markup=start_buttons()
-                )
-
-            else:
-
-                await query.message.edit_text(
-                    START_TEXT,
-                    reply_markup=start_buttons()
-                )
-
-            await query.answer()
-            return
-
-        # ----------------------------------------------------
-        # STATUS
-        # ----------------------------------------------------
-
-        if query.data == "status":
-
-            text = (
-                "╭━━━━━━━━━━━━━━━━━━━━━━╮\n"
-                "       🛡️ <b>𝐁𝐎𝐓 𝐒𝐓𝐀𝐓𝐔𝐒</b>\n"
-                "╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
-                "🟢 <b>𝐁𝐎𝐓:</b> 𝐎𝐍𝐋𝐈𝐍𝐄\n"
-                f"👑 <b>𝐎𝐖𝐍𝐄𝐑 𝐈𝐃:</b> "
-                f"<code>{OWNER_ID}</code>\n"
+            text = start_text(
+                query.from_user,
+                bot
             )
 
-            if (
-                query.message.chat
-                and query.message.chat.type
-                in (
-                    ChatType.GROUP,
-                    ChatType.SUPERGROUP
-                )
-            ):
-
-                enabled = get_setting(
-                    query.message.chat.id
-                )
-
-                text += (
-                    "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓:</b> "
-                    f"<b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
-                )
-
-            else:
-
-                text += (
-                    "🛡️ <b>𝐄𝐃𝐈𝐓 𝐃𝐄𝐋𝐄𝐓𝐄:</b> "
-                    "<b>𝐑𝐄𝐀𝐃𝐘</b>"
-                )
-
-            if query.message.photo:
-
-                await query.message.edit_caption(
-                    caption=text,
-                    reply_markup=navigation_buttons()
-                )
-
-            else:
-
-                await query.message.edit_text(
-                    text,
-                    reply_markup=navigation_buttons()
-                )
+            await query.message.edit_text(
+                text,
+                reply_markup=start_buttons()
+            )
 
             await query.answer()
+
             return
 
         await query.answer()
@@ -837,39 +896,43 @@ async def callbacks(_, query):
             e
         )
 
-        try:
-            await query.answer(
-                "Something went wrong."
-            )
-        except Exception:
-            pass
-
 
 # ============================================================
-# AUTH
+#                             AUTH
 # ============================================================
 
-@app.on_message(filters.command("auth"))
-async def auth_cmd(_, message: Message):
+@app.on_message(
+    filters.command("auth")
+)
+async def auth_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>This command works only in groups.</b>"
+            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>"
         )
 
-    if not await admin_only(message):
+    if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Group Owner / Admin only.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use:\n"
+            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
             "<code>/auth USER_ID</code>"
         )
 
@@ -880,38 +943,49 @@ async def auth_cmd(_, message: Message):
 
     await message.reply_text(
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "      👑 <b>𝐋𝐎𝐂𝐀𝐋 𝐀𝐔𝐓𝐇</b>\n"
+        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"✅ User <code>{uid}</code>\n"
-        "has been authorized."
+        f"✅ Usᴇʀ <code>{uid}</code>\n"
+        "<b>Aᴜᴛʜᴏʀɪᴢᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ.</b>"
     )
 
 
 # ============================================================
-# UNAUTH
+#                           UNAUTH
 # ============================================================
 
-@app.on_message(filters.command("unauth"))
-async def unauth_cmd(_, message: Message):
+@app.on_message(
+    filters.command("unauth")
+)
+async def unauth_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>This command works only in groups.</b>"
+            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>"
         )
 
-    if not await admin_only(message):
+    if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Group Owner / Admin only.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use:\n"
+            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
             "<code>/unauth USER_ID</code>"
         )
 
@@ -922,33 +996,42 @@ async def unauth_cmd(_, message: Message):
 
     await message.reply_text(
         (
-            f"✅ Authorization removed from "
+            f"✅ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ Fʀᴏᴍ "
             f"<code>{uid}</code>."
             if removed
             else
-            f"ℹ️ User <code>{uid}</code> "
-            "was not authorized."
+            f"ℹ️ Usᴇʀ <code>{uid}</code> "
+            "Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ."
         )
     )
 
 
 # ============================================================
-# AUTH USERS
+#                        AUTH USERS
 # ============================================================
 
-@app.on_message(filters.command("authusers"))
-async def authusers_cmd(_, message: Message):
+@app.on_message(
+    filters.command("authusers")
+)
+async def authusers_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>This command works only in groups.</b>"
+            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>"
         )
 
-    if not await admin_only(message):
+    if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Group Owner / Admin only.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     users = list_local(
@@ -958,12 +1041,12 @@ async def authusers_cmd(_, message: Message):
     if not users:
 
         return await message.reply_text(
-            "📭 <b>No local authorized users.</b>"
+            "📭 <b>Nᴏ Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀs.</b>"
         )
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "      👑 <b>𝐋𝐎𝐂𝐀𝐋 𝐀𝐔𝐓𝐇</b>\n"
+        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
     )
 
@@ -972,26 +1055,37 @@ async def authusers_cmd(_, message: Message):
         for uid in users
     )
 
-    await message.reply_text(text)
+    await message.reply_text(
+        text
+    )
 
 
 # ============================================================
-# CLEAR LOCAL AUTH
+#                     CLEAR LOCAL AUTH
 # ============================================================
 
-@app.on_message(filters.command("clearauthusers"))
-async def clearauthusers_cmd(_, message: Message):
+@app.on_message(
+    filters.command("clearauthusers")
+)
+async def clearauthusers_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>This command works only in groups.</b>"
+            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>"
         )
 
-    if not await admin_only(message):
+    if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Group Owner / Admin only.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     count = clear_local(
@@ -999,59 +1093,83 @@ async def clearauthusers_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        f"🧹 Cleared <b>{count}</b> local auth user(s)."
+        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>"
     )
 
 
 # ============================================================
-# GLOBAL AUTH
+#                         GLOBAL AUTH
 # ============================================================
 
-@app.on_message(filters.command("gauth"))
-async def gauth_cmd(_, message: Message):
+@app.on_message(
+    filters.command("gauth")
+)
+async def gauth_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Bot Owner only.</b>"
+            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use:\n"
+            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
             "<code>/gauth USER_ID</code>"
         )
 
-    add_global(uid)
+    add_global(
+        uid
+    )
 
     await message.reply_text(
-        f"🌐 User <code>{uid}</code>\n"
-        "has been globally authorized."
+        f"🌐 Usᴇʀ <code>{uid}</code>\n"
+        "<b>Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
     )
 
 
 # ============================================================
-# GLOBAL UNAUTH
+#                       GLOBAL UNAUTH
 # ============================================================
 
-@app.on_message(filters.command("gunauth"))
-async def gunauth_cmd(_, message: Message):
+@app.on_message(
+    filters.command("gunauth")
+)
+async def gunauth_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Bot Owner only.</b>"
+            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
-    uid = await resolve_user(message)
+    uid = await resolve_user(
+        message
+    )
 
     if not uid:
 
         return await message.reply_text(
-            "❌ Reply to a user or use:\n"
+            "❌ Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:\n"
             "<code>/gunauth USER_ID</code>"
         )
 
@@ -1061,27 +1179,35 @@ async def gunauth_cmd(_, message: Message):
 
     await message.reply_text(
         (
-            f"✅ Global authorization removed "
-            f"from <code>{uid}</code>."
+            f"✅ Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ: "
+            f"<code>{uid}</code>"
             if removed
             else
-            f"ℹ️ User <code>{uid}</code> "
-            "was not globally authorized."
+            f"ℹ️ Usᴇʀ <code>{uid}</code> Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ."
         )
     )
 
 
 # ============================================================
-# GLOBAL USERS
+#                         GLOBAL USERS
 # ============================================================
 
-@app.on_message(filters.command("gusers"))
-async def gusers_cmd(_, message: Message):
+@app.on_message(
+    filters.command("gusers")
+)
+async def gusers_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Bot Owner only.</b>"
+            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
     users = list_global()
@@ -1089,12 +1215,12 @@ async def gusers_cmd(_, message: Message):
     if not users:
 
         return await message.reply_text(
-            "📭 <b>No global authorized users.</b>"
+            "📭 <b>Nᴏ Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀs.</b>"
         )
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "      🌐 <b>𝐆𝐋𝐎𝐁𝐀𝐋 𝐀𝐔𝐓𝐇</b>\n"
+        "       🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
     )
 
@@ -1103,46 +1229,66 @@ async def gusers_cmd(_, message: Message):
         for uid in users
     )
 
-    await message.reply_text(text)
+    await message.reply_text(
+        text
+    )
 
 
 # ============================================================
-# CLEAR GLOBAL
+#                     CLEAR GLOBAL AUTH
 # ============================================================
 
-@app.on_message(filters.command("cleargusers"))
-async def cleargusers_cmd(_, message: Message):
+@app.on_message(
+    filters.command("cleargusers")
+)
+async def cleargusers_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not await owner_only(message):
 
         return await message.reply_text(
-            "❌ <b>Bot Owner only.</b>"
+            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
         )
 
     count = clear_global()
 
     await message.reply_text(
-        f"🧹 Cleared <b>{count}</b> global auth user(s)."
+        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>"
     )
 
 
 # ============================================================
-# ADMIN EDIT
+#                       ADMIN EDIT MODE
 # ============================================================
 
-@app.on_message(filters.command("adminedit"))
-async def adminedit_cmd(_, message: Message):
+@app.on_message(
+    filters.command("adminedit")
+)
+async def adminedit_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>This command works only in groups.</b>"
+            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>"
         )
 
-    if not await admin_only(message):
+    if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Group Owner / Admin only.</b>"
+            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>"
         )
 
     parts = (
@@ -1159,14 +1305,16 @@ async def adminedit_cmd(_, message: Message):
     ):
 
         current = (
-            "🟢 ON"
-            if get_setting(message.chat.id)
-            else "🔴 OFF"
+            "🟢 Oɴ"
+            if get_setting(
+                message.chat.id
+            )
+            else "🔴 Oғғ"
         )
 
         return await message.reply_text(
-            "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓 𝐃𝐄𝐋𝐄𝐓𝐄</b>\n\n"
-            f"Current: <b>{current}</b>\n\n"
+            "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Dᴇʟᴇᴛᴇ</b>\n\n"
+            f"Cᴜʀʀᴇɴᴛ: <b>{current}</b>\n\n"
             "<code>/adminedit on</code>\n"
             "<code>/adminedit off</code>"
         )
@@ -1182,53 +1330,45 @@ async def adminedit_cmd(_, message: Message):
     )
 
     await message.reply_text(
-        "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓 𝐃𝐄𝐋𝐄𝐓𝐄</b>\n\n"
-        f"Status: <b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
+        "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Dᴇʟᴇᴛᴇ</b>\n\n"
+        f"Sᴛᴀᴛᴜs: <b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>"
     )
 
 
 # ============================================================
-# EDITED MESSAGE GUARD
-# ============================================================
-#
-# IMPORTANT:
-# DO NOT USE filters.supergroup
-#
-# filters.group handles groups + supergroups.
+#                       EDIT GUARDIAN
 # ============================================================
 
-@app.on_edited_message(filters.group)
-async def edited_guard(_, message: Message):
+@app.on_edited_message(
+    filters.group
+)
+async def edited_guard(
+    _,
+    message: Message
+):
 
     if not message.from_user:
         return
 
-    # Ignore bot messages
     if message.from_user.is_bot:
         return
 
     uid = message.from_user.id
 
-    # --------------------------------------------------------
-    # LOCAL AUTH
-    # --------------------------------------------------------
+    save_user(
+        message.from_user
+    )
 
+    # Local auth users are protected
     if local_authed(
         message.chat.id,
         uid
     ):
         return
 
-    # --------------------------------------------------------
-    # GLOBAL AUTH
-    # --------------------------------------------------------
-
+    # Global auth users are protected
     if global_authed(uid):
         return
-
-    # --------------------------------------------------------
-    # MEMBER STATUS
-    # --------------------------------------------------------
 
     try:
 
@@ -1239,25 +1379,16 @@ async def edited_guard(_, message: Message):
 
         status = member.status
 
-    except RPCError as e:
-
-        log.debug(
-            "Member status check failed: %s",
-            e
-        )
+    except RPCError:
 
         status = None
 
-    # --------------------------------------------------------
-    # ADMIN / OWNER
-    # --------------------------------------------------------
-
+    # Admin / owner
     if status in (
         ChatMemberStatus.ADMINISTRATOR,
-        ChatMemberStatus.OWNER,
+        ChatMemberStatus.OWNER
     ):
 
-        # Admin edits OFF by default.
         if not get_setting(
             message.chat.id
         ):
@@ -1269,48 +1400,386 @@ async def edited_guard(_, message: Message):
 
         return
 
-    # --------------------------------------------------------
-    # NORMAL MEMBER
-    # --------------------------------------------------------
-
+    # Normal members
     await delete_quietly(
         message
     )
 
 
 # ============================================================
-# STATS
+#                         BROADCAST COPY
 # ============================================================
 
-@app.on_message(filters.command("stats"))
-async def stats_cmd(_, message: Message):
+async def broadcast_copy(
+    source_message
+):
 
-    if not await admin_only(message):
-
-        return await message.reply_text(
-            "❌ <b>Admin / Owner only.</b>"
-        )
-
-    rows = get_stats()
-
-    starts = rows.get(
-        "starts",
-        0
+    users = users_col.find(
+        {
+            "is_bot": {
+                "$ne": True
+            }
+        },
+        {
+            "_id": 0,
+            "user_id": 1
+        }
     )
 
-    deleted = rows.get(
-        "deleted_edits",
-        0
+    total = 0
+    success = 0
+    failed = 0
+    removed = 0
+
+    for item in users:
+
+        user_id = item.get(
+            "user_id"
+        )
+
+        if not user_id:
+            continue
+
+        total += 1
+
+        try:
+
+            await source_message.copy(
+                chat_id=user_id
+            )
+
+            success += 1
+
+            await asyncio.sleep(
+                0.05
+            )
+
+        except FloodWait as e:
+
+            await asyncio.sleep(
+                e.value
+            )
+
+            try:
+
+                await source_message.copy(
+                    chat_id=user_id
+                )
+
+                success += 1
+
+            except Exception:
+
+                failed += 1
+
+        except RPCError as e:
+
+            failed += 1
+
+            error = str(
+                e
+            ).lower()
+
+            if (
+                "blocked" in error
+                or "deactivated" in error
+                or "chat not found" in error
+            ):
+
+                removed += 1
+
+                try:
+
+                    users_col.delete_one(
+                        {
+                            "user_id": user_id
+                        }
+                    )
+
+                except Exception:
+                    pass
+
+        except Exception as e:
+
+            failed += 1
+
+            log.debug(
+                "Broadcast error: %s",
+                e
+            )
+
+    return (
+        total,
+        success,
+        failed,
+        removed
+    )
+
+
+# ============================================================
+#                          BROADCAST
+# ============================================================
+
+@app.on_message(
+    filters.command("broadcast")
+)
+async def broadcast_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
+
+    if not await owner_only(message):
+
+        return await message.reply_text(
+            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
+        )
+
+    # --------------------------------------------------------
+    # REPLY BROADCAST
+    # --------------------------------------------------------
+
+    if message.reply_to_message:
+
+        progress = await message.reply_text(
+            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀᴛ𝛆ɗ...</b>\n\n"
+            "⏳ Pʟᴇᴀsᴇ Wᴀɪᴛ..."
+        )
+
+        (
+            total,
+            success,
+            failed,
+            removed
+        ) = await broadcast_copy(
+            message.reply_to_message
+        )
+
+        await progress.edit_text(
+            "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+            "       📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"👥 Tᴏᴛᴀʟ: <code>{total}</code>\n"
+            f"✅ Sᴇɴᴛ: <code>{success}</code>\n"
+            f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
+            f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
+            "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛ𝛆ɗ.</b>"
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # TEXT BROADCAST
+    # --------------------------------------------------------
+
+    parts = (
+        message.text or ""
+    ).split(
+        maxsplit=1
+    )
+
+    if len(parts) < 2:
+
+        return await message.reply_text(
+            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Uѕᴧɢ𝛆</b>\n\n"
+            "Tᴇxᴛ:\n"
+            "<code>/broadcast Hello ❤️</code>\n\n"
+            "Oʀ Rᴇᴘʟʏ Tᴏ Aɴʏ Mᴇssᴀɢᴇ:\n"
+            "<code>/broadcast</code>"
+        )
+
+    text = parts[1].strip()
+
+    if not text:
+
+        return await message.reply_text(
+            "❌ <b>Bʀᴏᴀᴅᴄᴀsᴛ Mᴇssᴀɢᴇ Is Eᴍᴘᴛʏ.</b>"
+        )
+
+    progress = await message.reply_text(
+        "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴧʀᴛ𝛆ɗ...</b>\n\n"
+        "⏳ Pʟᴇᴀsᴇ Wᴀɪᴛ..."
+    )
+
+    users = users_col.find(
+        {
+            "is_bot": {
+                "$ne": True
+            }
+        },
+        {
+            "_id": 0,
+            "user_id": 1
+        }
+    )
+
+    total = 0
+    success = 0
+    failed = 0
+    removed = 0
+
+    for item in users:
+
+        user_id = item.get(
+            "user_id"
+        )
+
+        if not user_id:
+            continue
+
+        total += 1
+
+        try:
+
+            await app.send_message(
+                chat_id=user_id,
+                text=text
+            )
+
+            success += 1
+
+            await asyncio.sleep(
+                0.05
+            )
+
+        except FloodWait as e:
+
+            await asyncio.sleep(
+                e.value
+            )
+
+            try:
+
+                await app.send_message(
+                    chat_id=user_id,
+                    text=text
+                )
+
+                success += 1
+
+            except Exception:
+
+                failed += 1
+
+        except RPCError as e:
+
+            failed += 1
+
+            error = str(
+                e
+            ).lower()
+
+            if (
+                "blocked" in error
+                or "deactivated" in error
+                or "chat not found" in error
+            ):
+
+                removed += 1
+
+                try:
+
+                    users_col.delete_one(
+                        {
+                            "user_id": user_id
+                        }
+                    )
+
+                except Exception:
+                    pass
+
+        except Exception:
+
+            failed += 1
+
+    await progress.edit_text(
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "       📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"👥 Tᴏᴛᴀʟ: <code>{total}</code>\n"
+        f"✅ Sᴇɴᴛ: <code>{success}</code>\n"
+        f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
+        f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
+        "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛ𝛆ɗ.</b>"
+    )
+
+
+# ============================================================
+#                      BROADCAST STATS
+# ============================================================
+
+@app.on_message(
+    filters.command("broadcast_stats")
+)
+async def broadcast_stats_cmd(
+    _,
+    message: Message
+):
+
+    if not await owner_only(message):
+
+        return await message.reply_text(
+            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>"
+        )
+
+    total = users_col.count_documents(
+        {
+            "is_bot": {
+                "$ne": True
+            }
+        }
+    )
+
+    await message.reply_text(
+        "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+        "     📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀᴛs</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"👥 Sᴀᴠᴇᴅ Usᴇʀs: <code>{total}</code>\n"
+        f"▶️ Sᴛᴀʀᴛs: <code>{get_stat('starts')}</code>\n"
+        f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
+        f"<code>{get_stat('deleted_edits')}</code>"
+    )
+
+
+# ============================================================
+#                            STATS
+# ============================================================
+
+@app.on_message(
+    filters.command("stats")
+)
+async def stats_cmd(
+    _,
+    message: Message
+):
+
+    if not await is_admin(message):
+
+        return await message.reply_text(
+            "❌ <b>Aᴅᴍɪɴ / Oᴡɴᴇʀ Oɴʟʏ.</b>"
+        )
+
+    total_users = users_col.count_documents(
+        {
+            "is_bot": {
+                "$ne": True
+            }
+        }
     )
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       📊 <b>𝐊𝐈𝐑𝐓𝐈 𝐒𝐓𝐀𝐓𝐒</b>\n"
+        "        📊 <b>Kɪʀᴛɪ Sᴛᴀᴛs</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"▶️ <b>𝐒𝐓𝐀𝐑𝐓𝐒:</b> "
-        f"<code>{starts}</code>\n"
-        f"🗑️ <b>𝐃𝐄𝐋𝐄𝐓𝐄𝐃 𝐄𝐃𝐈𝐓𝐒:</b> "
-        f"<code>{deleted}</code>\n"
+        f"▶️ Sᴛᴀʀᴛs: "
+        f"<code>{get_stat('starts')}</code>\n"
+        f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
+        f"<code>{get_stat('deleted_edits')}</code>\n"
+        f"👥 Sᴀᴠᴇᴅ Usᴇʀs: "
+        f"<code>{total_users}</code>\n"
     )
 
     if is_group(message):
@@ -1320,61 +1789,76 @@ async def stats_cmd(_, message: Message):
         )
 
         text += (
-            "🛡️ <b>𝐀𝐃𝐌𝐈𝐍 𝐄𝐃𝐈𝐓:</b> "
-            f"<b>{'🟢 ON' if enabled else '🔴 OFF'}</b>"
+            f"🛡️ Aᴅᴍɪɴ Eᴅɪᴛ: "
+            f"<b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>"
         )
 
-    await message.reply_text(text)
+    await message.reply_text(
+        text
+    )
 
 
 # ============================================================
-# ID
+#                              ID
 # ============================================================
 
 @app.on_message(
     filters.private & filters.command("id")
 )
-async def id_cmd(_, message: Message):
+async def id_cmd(
+    _,
+    message: Message
+):
+
+    save_message_user(
+        message
+    )
 
     if not message.from_user:
         return
 
     await message.reply_text(
-        "🆔 <b>𝐘𝐎𝐔𝐑 𝐓𝐄𝐋𝐄𝐆𝐑𝐀𝐌 𝐈𝐃</b>\n\n"
+        "🆔 <b>Yᴏᴜʀ Tᴇʟᴇɢʀᴀᴍ ID</b>\n\n"
         f"<code>{message.from_user.id}</code>"
     )
 
 
 # ============================================================
-# START BOT
+#                            STARTUP
 # ============================================================
 
 if __name__ == "__main__":
 
-    init_db()
-
     log.info(
-        "=========================================="
+        "======================================"
     )
 
     log.info(
-        "KIRTI GUARDIAN BOT [V2] STARTING..."
+        "KIRTI GUARDIAN BOT STARTING"
     )
 
     log.info(
-        "Group / Supergroup detection: FIXED"
+        "MongoDB: CONNECTED"
     )
 
     log.info(
-        "Owner + Admin commands: ENABLED"
+        "Broadcast: ENABLED"
     )
 
     log.info(
-        "Edited message protection: ENABLED"
+        "Owner/Admin system: ENABLED"
     )
 
     log.info(
-        "=========================================="
+        "Edit Guardian: ENABLED"
+    )
+
+    log.info(
+        "Status system: REMOVED"
+    )
+
+    log.info(
+        "======================================"
     )
 
     app.run()
