@@ -27,9 +27,15 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "kirti_guardian").strip()
+MONGO_DB_NAME = os.getenv(
+    "MONGO_DB_NAME",
+    "kirti_guardian"
+).strip()
 
-START_IMAGE = os.getenv("START_IMAGE", "https://h.uguu.se/FekWWcsz.jpg").strip()
+START_IMAGE = os.getenv(
+    "START_IMAGE",
+    "https://h.uguu.se/FekWWcsz.jpg"
+).strip()
 
 BOT_USERNAME = os.getenv(
     "BOT_USERNAME",
@@ -119,11 +125,7 @@ def sqlite_conn():
         SQLITE_DB,
         timeout=30
     )
-
-    con.execute(
-        "PRAGMA journal_mode=WAL"
-    )
-
+    con.execute("PRAGMA journal_mode=WAL")
     return con
 
 
@@ -174,7 +176,7 @@ def init_sqlite():
 
 
 # ============================================================
-#                       DATABASE INIT
+#                    DATABASE INITIALIZATION
 # ============================================================
 
 def init_database():
@@ -196,7 +198,7 @@ def init_database():
         return
 
     if not MONGO_AVAILABLE:
-        log.warning("pymongo is not installed.")
+        log.warning("pymongo not installed.")
         log.warning("Using SQLite fallback.")
         return
 
@@ -259,7 +261,7 @@ def init_database():
 
 
 # ============================================================
-#                           STATS
+#                         STATISTICS
 # ============================================================
 
 def stat_inc(key, amount=1):
@@ -334,7 +336,7 @@ def get_stat(key):
 
 
 # ============================================================
-#                            USERS
+#                           USERS
 # ============================================================
 
 def save_user(user):
@@ -400,13 +402,8 @@ def save_user(user):
 
 def save_message_user(message):
 
-    if (
-        message
-        and message.from_user
-    ):
-        save_user(
-            message.from_user
-        )
+    if message and message.from_user:
+        save_user(message.from_user)
 
 
 def user_count():
@@ -415,13 +412,11 @@ def user_count():
 
         try:
 
-            return users_col.count_documents(
-                {
-                    "is_bot": {
-                        "$ne": True
-                    }
+            return users_col.count_documents({
+                "is_bot": {
+                    "$ne": True
                 }
-            )
+            })
 
         except Exception:
             pass
@@ -484,13 +479,10 @@ def remove_user(user_id):
     if USE_MONGO:
 
         try:
-
             users_col.delete_one(
                 {"user_id": user_id}
             )
-
             return
-
         except Exception:
             pass
 
@@ -588,15 +580,12 @@ def get_setting(chat_id):
                 {"chat_id": chat_id}
             )
 
-            if data:
-                return bool(
-                    data.get(
-                        "admin_edit",
-                        False
-                    )
+            return bool(
+                data.get(
+                    "admin_edit",
+                    False
                 )
-
-            return False
+            ) if data else False
 
         except Exception:
             pass
@@ -648,7 +637,6 @@ def set_setting(
                 admin_edit
             )
             VALUES(?, ?)
-
             ON CONFLICT(chat_id)
             DO UPDATE SET
                 admin_edit=excluded.admin_edit
@@ -796,7 +784,9 @@ def clear_local(chat_id):
         try:
 
             result = local_auth_col.delete_many(
-                {"chat_id": chat_id}
+                {
+                    "chat_id": chat_id
+                }
             )
 
             return result.deleted_count
@@ -1202,24 +1192,24 @@ HELP_TEXT = """
 <b>• /gusers - ᴠɪᴇᴡ ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ᴜsᴇʀs</b>
 <b>• /cleargusers - ᴄʟᴇᴀʀ ᴀʟʟ ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ᴜsᴇʀs</b>
 
-<b>🛡️ ᴇᴅɪᴛ ᴅᴇʟᴇᴛᴇ ( ᴀᴅᴍɪɴ ᴏɴʟʏ ) -</b>
+<b>🛡️ ᴇᴅɪᴛ ᴅᴇʟᴇᴛᴇ ( ᴀᴅᴍɪɴ ᴏɴʟʏ )-</b>
 
-<b>• /adminedit on - ᴅᴇʟᴇᴛᴇ ᴇᴅɪᴛs ғᴏʀ ᴀᴅᴍɪɴs</b>
+<b>• /adminedit on - ᴅᴇʟᴇᴛᴇ ᴀᴅᴍɪɴ ᴇᴅɪᴛs</b>
 <b>• /adminedit off - ɪɢɴᴏʀᴇ ᴀᴅᴍɪɴ ᴇᴅɪᴛs</b>
 <b>• ᴅᴇғᴜʟᴛ : 🔴 ᴏғғ</b>
 
-<b>📢 ʙʀᴏᴀᴅᴄᴀsᴛ ( ᴏᴡɴᴇʀ ᴏɴʟʏ ) -</b>
+<b>📢 ʙʀᴏᴀᴅᴄᴀsᴛ ( ᴏᴡɴᴇʀ ᴏɴʟʏ )-</b>
 
-<b>• /broadcast MESSAGE - ʙʀᴏᴀᴅᴄᴀsᴛ ᴍᴇssᴀɢᴇ</b>
-<b>• /broadcast - ʀᴇᴘʟʏ ᴛᴏ ᴀɴʏ ᴍᴇssᴀɢᴇ</b>
-<b>• /broadcast_stats - ᴠɪᴇᴡ ʙʀᴏᴀᴅᴄᴀsᴛ sᴛᴀᴛɪsᴛɪᴄs</b>
+<b>• /broadcast MESSAGE</b>
+<b>• /broadcast - ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ</b>
+<b>• /broadcast_stats - sᴛᴀᴛɪsᴛɪᴄs</b>
 
-<b>📊 ᴏᴛʜᴇʀ -</b>
+<b>📊 ᴏᴛʜᴇʀ-</b>
 
-<b>• /start - ᴄʜᴇᴄᴋ ʙᴏᴛ ᴀʟɪᴠᴇ</b>
-<b>• /stats - ᴄʜᴇᴄᴋ ʙᴏᴛ sᴛᴀᴛɪsᴛɪᴄs</b>
-<b>• /help - ᴄʜᴇᴄᴋ ʙᴏᴛ ʜᴇʟᴘ</b>
-<b>• /id - ᴄʜᴇᴄᴋ ʏᴏᴜʀ ᴛᴇʟᴇɢʀᴀᴍ ɪᴅ</b>
+<b>• /start - ᴄʜᴇᴄᴋ ʙᴏᴛ</b>
+<b>• /stats - ᴄʜᴇᴄᴋ sᴛᴀᴛs</b>
+<b>• /help - ᴄʜᴇᴄᴋ ʜᴇʟᴘ</b>
+<b>• /id - ᴄʜᴇᴄᴋ ʏᴏᴜʀ ɪᴅ</b>
 
 <b>⚡ ᴀᴅᴅ ᴍᴇ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ
 ᴀɴᴅ ɢɪᴠᴇ ᴍᴇ "ᴅᴇʟᴇᴛᴇ ᴍᴇssᴀɢᴇs"
@@ -1234,7 +1224,7 @@ HELP_TEXT = """
 
 
 # ============================================================
-#                          BUTTONS
+#                       START BUTTONS
 # ============================================================
 
 def start_buttons():
@@ -1243,7 +1233,7 @@ def start_buttons():
 
     rows.append([
         InlineKeyboardButton(
-            "✚ Aᴅᴅ Mᴇ Iɴ Yᴏᴜʀ Gʀᴏᴜᴘ ✚",
+            "✚ ᴀᴅᴅ ᴍᴇ ɪɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ ✚",
             url=(
                 f"https://t.me/"
                 f"{BOT_USERNAME}"
@@ -1258,7 +1248,7 @@ def start_buttons():
 
         contact_row.append(
             InlineKeyboardButton(
-                "💬 Oᴡɴᴇʀ",
+                "👑 ᴏᴡɴᴇʀ",
                 url=(
                     f"https://t.me/"
                     f"{OWNER_USERNAME}"
@@ -1270,7 +1260,7 @@ def start_buttons():
 
         contact_row.append(
             InlineKeyboardButton(
-                "👨‍💼 Sᴜᴘᴘᴏʀᴛ",
+                "🛠️ sᴜᴘᴘᴏʀᴛ",
                 url=(
                     f"https://t.me/"
                     f"{SUPPORT_USERNAME}"
@@ -1283,7 +1273,7 @@ def start_buttons():
 
     rows.append([
         InlineKeyboardButton(
-            "📚 Hᴇʟᴘ & Cᴏᴍᴍᴀɴᴅs",
+            "📚 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs",
             callback_data="help"
         )
     ])
@@ -1296,11 +1286,97 @@ def home_buttons():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🏠 Hᴏᴍᴇ",
+                "🏠 ʜᴏᴍᴇ",
                 callback_data="home"
             )
         ]
     ])
+
+
+# ============================================================
+#                     START LOGGER
+# ============================================================
+
+async def send_start_logger(
+    user,
+    bot
+):
+
+    if not user:
+        return
+
+    try:
+
+        username = (
+            f"@{user.username}"
+            if user.username
+            else "N/A"
+        )
+
+        full_name = (
+            user.first_name
+            or "Unknown"
+        )
+
+        if user.last_name:
+            full_name += (
+                f" {user.last_name}"
+            )
+
+        bot_name = (
+            bot.first_name
+            if bot
+            else "Kirti Guardian"
+        )
+
+        logger_text = (
+            "╭━━━━━━━━━━━━━━━━━━━━╮\n"
+            "       🚀 <b>ɴᴇᴡ sᴛᴀʀᴛ ʟᴏɢ</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"👤 <b>ɴᴀᴍᴇ:</b> "
+            f"{full_name}\n"
+            f"🔗 <b>ᴜsᴇʀɴᴀᴍᴇ:</b> "
+            f"{username}\n"
+            f"🆔 <b>ᴜsᴇʀ ɪᴅ:</b> "
+            f"<code>{user.id}</code>\n\n"
+            f"🤖 <b>ʙᴏᴛ:</b> "
+            f"{bot_name}\n\n"
+            "✅ <b>ᴜsᴇʀ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ.</b>"
+        )
+
+        await app.send_message(
+            OWNER_ID,
+            logger_text,
+            parse_mode=ParseMode.HTML
+        )
+
+    except FloodWait as e:
+
+        await asyncio.sleep(
+            e.value
+        )
+
+        try:
+
+            await app.send_message(
+                OWNER_ID,
+                logger_text,
+                parse_mode=ParseMode.HTML
+            )
+
+        except Exception as retry_error:
+
+            log.warning(
+                "Start logger retry failed: %s",
+                retry_error
+            )
+
+    except Exception as e:
+
+        log.warning(
+            "Start logger error: %s",
+            e
+        )
 
 
 # ============================================================
@@ -1318,34 +1394,39 @@ async def start_cmd(
     if not message.from_user:
         return
 
-    save_message_user(
-        message
-    )
+    save_message_user(message)
 
-    stat_inc(
-        "starts"
-    )
+    stat_inc("starts")
 
     bot = await app.get_me()
+
+    # --------------------------------------------------------
+    # LOG EVERY START TO OWNER
+    # --------------------------------------------------------
+
+    await send_start_logger(
+        message.from_user,
+        bot
+    )
 
     text = start_text(
         message.from_user,
         bot
     )
 
-    if (
-        START_IMAGE
-        and os.path.exists(
-            START_IMAGE
-        )
-    ):
+    # --------------------------------------------------------
+    # START IMAGE
+    # --------------------------------------------------------
+
+    if START_IMAGE:
 
         try:
 
             await message.reply_photo(
                 photo=START_IMAGE,
                 caption=text,
-                reply_markup=start_buttons()
+                reply_markup=start_buttons(),
+                parse_mode=ParseMode.HTML
             )
 
             return
@@ -1376,9 +1457,7 @@ async def help_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
+    save_message_user(message)
 
     await message.reply_text(
         HELP_TEXT,
@@ -1408,7 +1487,7 @@ async def callbacks(
             )
 
             await query.answer(
-                "Hᴇʟᴘ"
+                "ʜᴇʟᴘ"
             )
 
             return
@@ -1429,7 +1508,7 @@ async def callbacks(
             )
 
             await query.answer(
-                "Hᴏᴍᴇ"
+                "ʜᴏᴍᴇ"
             )
 
             return
@@ -1445,7 +1524,7 @@ async def callbacks(
 
 
 # ============================================================
-#                            AUTH
+#                           AUTH
 # ============================================================
 
 @app.on_message(
@@ -1459,25 +1538,23 @@ async def auth_cmd(
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
+            "❌ <b>ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ᴡᴏʀᴋs ᴏɴʟʏ ɪɴ ɢʀᴏᴜᴘs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
+            "❌ <b>ɢʀᴏᴜᴘ ᴏᴡɴᴇʀ / ᴀᴅᴍɪɴ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
-    uid = await resolve_user(
-        message
-    )
+    uid = await resolve_user(message)
 
     if not uid:
 
         return await message.reply_text(
-            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
+            "❌ <b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜsᴇʀ ᴏʀ ᴜsᴇ:</b>\n"
             "<code>/auth USER_ID</code>",
             parse_mode=ParseMode.HTML
         )
@@ -1489,16 +1566,16 @@ async def auth_cmd(
 
     await message.reply_text(
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
+        "       👑 <b>ʟᴏᴄᴀʟ ᴀᴜᴛʜ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"✅ Usᴇʀ: <code>{uid}</code>\n"
-        "✨ <b>Aᴜᴛʜᴏʀɪᴢᴇᴅ Sᴜᴄᴄᴇssғᴜʟʟʏ.</b>",
+        f"✅ ᴜsᴇʀ: <code>{uid}</code>\n"
+        "✨ <b>ᴀᴜᴛʜᴏʀɪᴢᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ.</b>",
         parse_mode=ParseMode.HTML
     )
 
 
 # ============================================================
-#                           UNAUTH
+#                          UNAUTH
 # ============================================================
 
 @app.on_message(
@@ -1512,25 +1589,23 @@ async def unauth_cmd(
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
+            "❌ <b>ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ᴡᴏʀᴋs ᴏɴʟʏ ɪɴ ɢʀᴏᴜᴘs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
+            "❌ <b>ɢʀᴏᴜᴘ ᴏᴡɴᴇʀ / ᴀᴅᴍɪɴ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
-    uid = await resolve_user(
-        message
-    )
+    uid = await resolve_user(message)
 
     if not uid:
 
         return await message.reply_text(
-            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
+            "❌ <b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜsᴇʀ ᴏʀ ᴜsᴇ:</b>\n"
             "<code>/unauth USER_ID</code>",
             parse_mode=ParseMode.HTML
         )
@@ -1543,14 +1618,14 @@ async def unauth_cmd(
     if removed:
 
         text = (
-            f"✅ <b>Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ:</b>\n"
+            f"✅ <b>ᴀᴜᴛʜ ʀᴇᴍᴏᴠᴇᴅ:</b>\n"
             f"<code>{uid}</code>"
         )
 
     else:
 
         text = (
-            f"ℹ️ <b>Usᴇʀ Wᴀs Nᴏᴛ Aᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
+            f"ℹ️ <b>ᴜsᴇʀ ᴡᴀs ɴᴏᴛ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
             f"<code>{uid}</code>"
         )
 
@@ -1575,14 +1650,14 @@ async def authusers_cmd(
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
+            "❌ <b>ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ᴡᴏʀᴋs ᴏɴʟʏ ɪɴ ɢʀᴏᴜᴘs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
+            "❌ <b>ɢʀᴏᴜᴘ ᴏᴡɴᴇʀ / ᴀᴅᴍɪɴ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
@@ -1593,13 +1668,13 @@ async def authusers_cmd(
     if not users:
 
         return await message.reply_text(
-            "📭 <b>Nᴏ Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀs.</b>",
+            "📭 <b>ɴᴏ ʟᴏᴄᴀʟ ᴀᴜᴛʜ ᴜsᴇʀs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       👑 <b>Lᴏᴄᴀʟ Aᴜᴛʜ</b>\n"
+        "       👑 <b>ʟᴏᴄᴀʟ ᴀᴜᴛʜ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
     )
 
@@ -1615,7 +1690,7 @@ async def authusers_cmd(
 
 
 # ============================================================
-#                     CLEAR LOCAL AUTH
+#                    CLEAR LOCAL AUTH
 # ============================================================
 
 @app.on_message(
@@ -1629,14 +1704,14 @@ async def clear_auth_cmd(
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
+            "❌ <b>ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ᴡᴏʀᴋs ᴏɴʟʏ ɪɴ ɢʀᴏᴜᴘs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
+            "❌ <b>ɢʀᴏᴜᴘ ᴏᴡɴᴇʀ / ᴀᴅᴍɪɴ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
@@ -1645,13 +1720,13 @@ async def clear_auth_cmd(
     )
 
     await message.reply_text(
-        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Lᴏᴄᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>",
+        f"🧹 <b>ᴄʟᴇᴀʀᴇᴅ {count} ʟᴏᴄᴀʟ ᴀᴜᴛʜ ᴜsᴇʀ(s).</b>",
         parse_mode=ParseMode.HTML
     )
 
 
 # ============================================================
-#                         GLOBAL AUTH
+#                       GLOBAL AUTH
 # ============================================================
 
 @app.on_message(
@@ -1665,18 +1740,16 @@ async def gauth_cmd(
     if not await is_owner(message):
 
         return await message.reply_text(
-            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ʙᴏᴛ ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
-    uid = await resolve_user(
-        message
-    )
+    uid = await resolve_user(message)
 
     if not uid:
 
         return await message.reply_text(
-            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
+            "❌ <b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜsᴇʀ ᴏʀ ᴜsᴇ:</b>\n"
             "<code>/gauth USER_ID</code>",
             parse_mode=ParseMode.HTML
         )
@@ -1684,7 +1757,7 @@ async def gauth_cmd(
     add_global(uid)
 
     await message.reply_text(
-        f"🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Aᴅᴅᴇᴅ:</b>\n"
+        f"🌐 <b>ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ᴀᴅᴅᴇᴅ:</b>\n"
         f"<code>{uid}</code>",
         parse_mode=ParseMode.HTML
     )
@@ -1701,33 +1774,28 @@ async def gunauth_cmd(
     if not await is_owner(message):
 
         return await message.reply_text(
-            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ʙᴏᴛ ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
-    uid = await resolve_user(
-        message
-    )
+    uid = await resolve_user(message)
 
     if not uid:
 
         return await message.reply_text(
-            "❌ <b>Rᴇᴘʟʏ Tᴏ A Usᴇʀ Oʀ Usᴇ:</b>\n"
+            "❌ <b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴜsᴇʀ ᴏʀ ᴜsᴇ:</b>\n"
             "<code>/gunauth USER_ID</code>",
             parse_mode=ParseMode.HTML
         )
 
-    removed = remove_global(
-        uid
-    )
+    removed = remove_global(uid)
 
     text = (
-        f"✅ <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Rᴇᴍᴏᴠᴇᴅ:</b>\n"
+        f"✅ <b>ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ʀᴇᴍᴏᴠᴇᴅ:</b>\n"
         f"<code>{uid}</code>"
         if removed
         else
-        f"ℹ️ <b>Usᴇʀ Wᴀs Nᴏᴛ Gʟᴏʙᴀʟʟʏ Aᴜᴛʜᴏʀɪᴢᴇᴅ:</b>\n"
-        f"<code>{uid}</code>"
+        "ℹ️ <b>ᴜsᴇʀ ᴡᴀs ɴᴏᴛ ɢʟᴏʙᴀʟʟʏ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ.</b>"
     )
 
     await message.reply_text(
@@ -1747,7 +1815,7 @@ async def gusers_cmd(
     if not await is_owner(message):
 
         return await message.reply_text(
-            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ʙᴏᴛ ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
@@ -1756,12 +1824,12 @@ async def gusers_cmd(
     if not users:
 
         return await message.reply_text(
-            "📭 <b>Nᴏ Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀs.</b>",
+            "📭 <b>ɴᴏ ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ᴜsᴇʀs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     text = (
-        "🌐 <b>Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀs</b>\n\n"
+        "🌐 <b>ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ᴜsᴇʀs</b>\n\n"
     )
 
     text += "\n".join(
@@ -1786,14 +1854,14 @@ async def clear_global_cmd(
     if not await is_owner(message):
 
         return await message.reply_text(
-            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ʙᴏᴛ ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
     count = clear_global()
 
     await message.reply_text(
-        f"🧹 <b>Cʟᴇᴀʀᴇᴅ {count} Gʟᴏʙᴀʟ Aᴜᴛʜ Usᴇʀ(s).</b>",
+        f"🧹 <b>ᴄʟᴇᴀʀᴇᴅ {count} ɢʟᴏʙᴀʟ ᴀᴜᴛʜ ᴜsᴇʀ(s).</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -1813,14 +1881,14 @@ async def adminedit_cmd(
     if not is_group(message):
 
         return await message.reply_text(
-            "❌ <b>Tʜɪs Cᴏᴍᴍᴀɴᴅ Wᴏʀᴋs Oɴʟʏ Iɴ Gʀᴏᴜᴘs.</b>",
+            "❌ <b>ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ᴡᴏʀᴋs ᴏɴʟʏ ɪɴ ɢʀᴏᴜᴘs.</b>",
             parse_mode=ParseMode.HTML
         )
 
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Gʀᴏᴜᴘ Oᴡɴᴇʀ / Aᴅᴍɪɴ Oɴʟʏ.</b>",
+            "❌ <b>ɢʀᴏᴜᴘ ᴏᴡɴᴇʀ / ᴀᴅᴍɪɴ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
@@ -1835,22 +1903,21 @@ async def adminedit_cmd(
     ):
 
         current = (
-            "🟢 Oɴ"
+            "🟢 ᴏɴ"
             if get_setting(message.chat.id)
-            else "🔴 Oғғ"
+            else "🔴 ᴏғғ"
         )
 
         return await message.reply_text(
-            "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>\n\n"
-            f"Cᴜʀʀᴇɴᴛ: <b>{current}</b>\n\n"
+            "🛡️ <b>ᴀᴅᴍɪɴ ᴇᴅɪᴛ ɢᴜᴀʀᴅɪᴀɴ</b>\n\n"
+            f"ᴄᴜʀʀᴇɴᴛ: <b>{current}</b>\n\n"
             "<code>/adminedit on</code>\n"
             "<code>/adminedit off</code>",
             parse_mode=ParseMode.HTML
         )
 
     enabled = (
-        parts[1].lower()
-        == "on"
+        parts[1].lower() == "on"
     )
 
     set_setting(
@@ -1859,9 +1926,9 @@ async def adminedit_cmd(
     )
 
     await message.reply_text(
-        "🛡️ <b>Aᴅᴍɪɴ Eᴅɪᴛ Gᴜᴀʀᴅɪᴀɴ</b>\n\n"
-        f"Sᴛᴀᴛᴜs: "
-        f"<b>{'🟢 Oɴ' if enabled else '🔴 Oғғ'}</b>",
+        "🛡️ <b>ᴀᴅᴍɪɴ ᴇᴅɪᴛ ɢᴜᴀʀᴅɪᴀɴ</b>\n\n"
+        f"sᴛᴀᴛᴜs: "
+        f"<b>{'🟢 ᴏɴ' if enabled else '🔴 ᴏғғ'}</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -1870,8 +1937,9 @@ async def adminedit_cmd(
 #                       EDIT GUARDIAN
 # ============================================================
 
-# filters.group handles BOTH groups and supergroups.
-# Do NOT use filters.supergroup.
+# IMPORTANT:
+# filters.group covers GROUP + SUPERGROUP.
+# filters.supergroup does NOT exist in Pyrogram.
 
 @app.on_edited_message(
     filters.group
@@ -1889,7 +1957,6 @@ async def edited_guard(
 
     uid = message.from_user.id
 
-    # Authorized users are always allowed.
     if local_authed(
         message.chat.id,
         uid
@@ -1912,14 +1979,11 @@ async def edited_guard(
 
         status = None
 
-    # Admin / Owner
     if status in (
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.OWNER
     ):
 
-        # Default OFF.
-        # ON means delete admin edits.
         if not get_setting(
             message.chat.id
         ):
@@ -1945,140 +2009,54 @@ async def broadcast_cmd(
     if not await is_owner(message):
 
         return await message.reply_text(
-            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ʙᴏᴛ ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
-    user_ids = all_user_ids()
+    users = all_user_ids()
 
-    if not user_ids:
+    if not users:
 
         return await message.reply_text(
-            "📭 <b>Nᴏ Usᴇʀs Fᴏᴜɴᴅ.</b>",
+            "📭 <b>ɴᴏ sᴀᴠᴇᴅ ᴜsᴇʀs.</b>",
             parse_mode=ParseMode.HTML
         )
 
-    # ========================================================
-    # BROADCAST REPLIED MESSAGE
-    # ========================================================
+    # --------------------------------------------------------
+    # CHECK MESSAGE
+    # --------------------------------------------------------
 
-    if message.reply_to_message:
+    if not message.reply_to_message:
 
-        progress = await message.reply_text(
-            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀʀᴛᴇᴅ...</b>\n\n"
-            f"👥 Usᴇʀs: <code>{len(user_ids)}</code>\n"
-            "⏳ <b>Pʟᴇᴀsᴇ Wᴀɪᴛ...</b>",
-            parse_mode=ParseMode.HTML
+        parts = (
+            message.text or ""
+        ).split(
+            maxsplit=1
         )
 
-        sent = 0
-        failed = 0
-        removed = 0
+        if len(parts) < 2:
 
-        for uid in user_ids:
+            return await message.reply_text(
+                "📢 <b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴜsᴀɢᴇ:</b>\n\n"
+                "<code>/broadcast Hello ❤️</code>\n\n"
+                "ᴏʀ ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ:\n"
+                "<code>/broadcast</code>",
+                parse_mode=ParseMode.HTML
+            )
 
-            try:
+        broadcast_text = parts[1].strip()
 
-                await message.reply_to_message.copy(
-                    chat_id=uid
-                )
+        if not broadcast_text:
 
-                sent += 1
-
-                await asyncio.sleep(
-                    0.05
-                )
-
-            except FloodWait as e:
-
-                await asyncio.sleep(
-                    e.value
-                )
-
-                try:
-
-                    await message.reply_to_message.copy(
-                        chat_id=uid
-                    )
-
-                    sent += 1
-
-                except Exception:
-
-                    failed += 1
-
-            except RPCError as e:
-
-                failed += 1
-
-                error = str(e).lower()
-
-                if any(
-                    word in error
-                    for word in (
-                        "blocked",
-                        "deactivated",
-                        "chat not found"
-                    )
-                ):
-
-                    removed += 1
-
-                    remove_user(
-                        uid
-                    )
-
-            except Exception:
-
-                failed += 1
-
-        await progress.edit_text(
-            "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-            "       📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>\n"
-            "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"👥 Tᴏᴛᴀʟ: <code>{len(user_ids)}</code>\n"
-            f"✅ Sᴇɴᴛ: <code>{sent}</code>\n"
-            f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
-            f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
-            "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛᴇᴅ.</b>",
-            parse_mode=ParseMode.HTML
-        )
-
-        return
-
-    # ========================================================
-    # TEXT BROADCAST
-    # ========================================================
-
-    parts = (
-        message.text or ""
-    ).split(
-        maxsplit=1
-    )
-
-    if len(parts) < 2:
-
-        return await message.reply_text(
-            "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Usᴀɢᴇ</b>\n\n"
-            "<code>/broadcast Hello ❤️</code>\n\n"
-            "Oʀ Rᴇᴘʟʏ Tᴏ A Mᴇssᴀɢᴇ:\n"
-            "<code>/broadcast</code>",
-            parse_mode=ParseMode.HTML
-        )
-
-    text = parts[1].strip()
-
-    if not text:
-
-        return await message.reply_text(
-            "❌ <b>Bʀᴏᴀᴅᴄᴀsᴛ Mᴇssᴀɢᴇ Eᴍᴘᴛʏ.</b>",
-            parse_mode=ParseMode.HTML
-        )
+            return await message.reply_text(
+                "❌ <b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴍᴇssᴀɢᴇ ᴇᴍᴘᴛʏ.</b>",
+                parse_mode=ParseMode.HTML
+            )
 
     progress = await message.reply_text(
-        "📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀʀᴛᴇᴅ...</b>\n\n"
-        f"👥 Usᴇʀs: <code>{len(user_ids)}</code>\n"
-        "⏳ <b>Pʟᴇᴀsᴇ Wᴀɪᴛ...</b>",
+        "📢 <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴛᴀʀᴛᴇᴅ...</b>\n\n"
+        f"👥 ᴜsᴇʀs: <code>{len(users)}</code>\n"
+        "⏳ <b>ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -2086,16 +2064,22 @@ async def broadcast_cmd(
     failed = 0
     removed = 0
 
-    for uid in user_ids:
+    for uid in users:
 
         try:
 
-            # User broadcast is plain text.
-            # No HTML parsing here.
-            await app.send_message(
-                uid,
-                text
-            )
+            if message.reply_to_message:
+
+                await message.reply_to_message.copy(
+                    chat_id=uid
+                )
+
+            else:
+
+                await app.send_message(
+                    uid,
+                    broadcast_text
+                )
 
             sent += 1
 
@@ -2111,10 +2095,18 @@ async def broadcast_cmd(
 
             try:
 
-                await app.send_message(
-                    uid,
-                    text
-                )
+                if message.reply_to_message:
+
+                    await message.reply_to_message.copy(
+                        chat_id=uid
+                    )
+
+                else:
+
+                    await app.send_message(
+                        uid,
+                        broadcast_text
+                    )
 
                 sent += 1
 
@@ -2129,8 +2121,8 @@ async def broadcast_cmd(
             error = str(e).lower()
 
             if any(
-                word in error
-                for word in (
+                x in error
+                for x in (
                     "blocked",
                     "deactivated",
                     "chat not found"
@@ -2139,9 +2131,7 @@ async def broadcast_cmd(
 
                 removed += 1
 
-                remove_user(
-                    uid
-                )
+                remove_user(uid)
 
         except Exception:
 
@@ -2149,19 +2139,19 @@ async def broadcast_cmd(
 
     await progress.edit_text(
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "       📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ</b>\n"
+        "       📢 <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"👥 Tᴏᴛᴀʟ: <code>{len(user_ids)}</code>\n"
-        f"✅ Sᴇɴᴛ: <code>{sent}</code>\n"
-        f"❌ Fᴀɪʟᴇᴅ: <code>{failed}</code>\n"
-        f"🚫 Rᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
-        "✨ <b>Bʀᴏᴀᴅᴄᴀsᴛ Cᴏᴍᴘʟᴇᴛᴇᴅ.</b>",
+        f"👥 ᴛᴏᴛᴀʟ: <code>{len(users)}</code>\n"
+        f"✅ sᴇɴᴛ: <code>{sent}</code>\n"
+        f"❌ ғᴀɪʟᴇᴅ: <code>{failed}</code>\n"
+        f"🚫 ʀᴇᴍᴏᴠᴇᴅ: <code>{removed}</code>\n\n"
+        "✨ <b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴄᴏᴍᴘʟᴇᴛᴇᴅ.</b>",
         parse_mode=ParseMode.HTML
     )
 
 
 # ============================================================
-#                    BROADCAST STATISTICS
+#                    BROADCAST STATS
 # ============================================================
 
 @app.on_message(
@@ -2175,19 +2165,19 @@ async def broadcast_stats_cmd(
     if not await is_owner(message):
 
         return await message.reply_text(
-            "❌ <b>Bᴏᴛ Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ʙᴏᴛ ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
     await message.reply_text(
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "      📢 <b>Bʀᴏᴀᴅᴄᴀsᴛ Sᴛᴀᴛs</b>\n"
+        "       📢 <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴛᴀᴛs</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"👥 Sᴀᴠᴇᴅ Usᴇʀs: "
+        f"👥 sᴀᴠᴇᴅ ᴜsᴇʀs: "
         f"<code>{user_count()}</code>\n"
-        f"▶️ Sᴛᴀʀᴛs: "
+        f"▶️ sᴛᴀʀᴛs: "
         f"<code>{get_stat('starts')}</code>\n"
-        f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
+        f"🗑️ ᴅᴇʟᴇᴛᴇᴅ ᴇᴅɪᴛs: "
         f"<code>{get_stat('deleted_edits')}</code>",
         parse_mode=ParseMode.HTML
     )
@@ -2208,27 +2198,27 @@ async def stats_cmd(
     if not await is_admin(message):
 
         return await message.reply_text(
-            "❌ <b>Aᴅᴍɪɴ / Oᴡɴᴇʀ Oɴʟʏ.</b>",
+            "❌ <b>ᴀᴅᴍɪɴ / ᴏᴡɴᴇʀ ᴏɴʟʏ.</b>",
             parse_mode=ParseMode.HTML
         )
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━━╮\n"
-        "        📊 <b>Kɪʀᴛɪ Sᴛᴀᴛs</b>\n"
+        "        📊 <b>ᴋɪʀᴛɪ sᴛᴀᴛs</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"▶️ Sᴛᴀʀᴛs: "
+        f"▶️ sᴛᴀʀᴛs: "
         f"<code>{get_stat('starts')}</code>\n"
-        f"🗑️ Dᴇʟᴇᴛᴇᴅ Eᴅɪᴛs: "
+        f"🗑️ ᴅᴇʟᴇᴛᴇᴅ ᴇᴅɪᴛs: "
         f"<code>{get_stat('deleted_edits')}</code>\n"
-        f"👥 Sᴀᴠᴇᴅ Usᴇʀs: "
+        f"👥 sᴀᴠᴇᴅ ᴜsᴇʀs: "
         f"<code>{user_count()}</code>"
     )
 
     if is_group(message):
 
         text += (
-            "\n🛡️ Aᴅᴍɪɴ Eᴅɪᴛ: "
-            f"<b>{'🟢 Oɴ' if get_setting(message.chat.id) else '🔴 Oғғ'}</b>"
+            "\n🛡️ ᴀᴅᴍɪɴ ᴇᴅɪᴛ: "
+            f"<b>{'🟢 ᴏɴ' if get_setting(message.chat.id) else '🔴 ᴏғғ'}</b>"
         )
 
     await message.reply_text(
@@ -2249,22 +2239,20 @@ async def id_cmd(
     message: Message
 ):
 
-    save_message_user(
-        message
-    )
+    save_message_user(message)
 
     if not message.from_user:
         return
 
     await message.reply_text(
-        "🆔 <b>Yᴏᴜʀ Tᴇʟᴇɢʀᴀᴍ ID</b>\n\n"
+        "🆔 <b>ʏᴏᴜʀ ᴛᴇʟᴇɢʀᴀᴍ ɪᴅ</b>\n\n"
         f"<code>{message.from_user.id}</code>",
         parse_mode=ParseMode.HTML
     )
 
 
 # ============================================================
-#                           STARTUP
+#                          STARTUP
 # ============================================================
 
 if __name__ == "__main__":
@@ -2285,19 +2273,17 @@ if __name__ == "__main__":
     )
 
     log.info(
-        "Edit Guardian: ENABLED"
+        "Start logger: ON"
     )
 
     log.info(
-        "Broadcast: ENABLED"
+        "Owner button: %s",
+        "ON" if OWNER_USERNAME else "OFF"
     )
 
     log.info(
-        "Status Button: REMOVED"
-    )
-
-    log.info(
-        "Update Button: REMOVED"
+        "Support button: %s",
+        "ON" if SUPPORT_USERNAME else "OFF"
     )
 
     log.info(
