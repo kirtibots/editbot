@@ -1,0 +1,40 @@
+{
+  "name": "purvi-guardian-bot",
+  "description": "Telegram Edit Guardian Bot with local/global authorization and edited-message protection.",
+  "repository": "",
+  "keywords": [
+    "telegram",
+    "pyrogram",
+    "bot",
+    "guardian",
+    "edit-delete"
+  ],
+  "stack": "heroku-24",
+  "buildpacks": [
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-python"
+    }
+  ],
+  "env": {
+    "API_ID": {
+      "description": "Telegram API ID from my.telegram.org",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Telegram API hash from my.telegram.org",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Bot token from @BotFather",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Telegram numeric user ID of the bot owner",
+      "required": true
+    },
+    "START_IMAGE": {
+      "description": "Optional Telegram file_id or image URL. Leave blank to use the bundled start.jpg.",
+      "required": false
+    }
+  }
+}
