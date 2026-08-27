@@ -35,7 +35,7 @@ MONGO_DB_NAME = os.getenv(
 # Put start.jpg in the bot folder OR use an image URL.
 START_IMAGE = os.getenv(
     "START_IMAGE",
-    "start.jpg"
+    "https://h.uguu.se/FekWWcsz.jpg"
 ).strip()
 
 BOT_USERNAME = os.getenv(
