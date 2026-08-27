@@ -1,32 +1,63 @@
-# Purvi Guardian Bot
+<p align="center">
+<b>𝗗𝗘𝗣𝗟𝗢𝗬𝗠𝗘𝗡𝗧 𝗠𝗘𝗧𝗛𝗢𝗗𝗦</b>
+</p>
 
-Telegram **Edit Guardian** bot based on the command layout shown in the reference screenshot.
+<h3 align="center">
+    ─「 ᴅᴇᴩʟᴏʏ ᴏɴ ʜᴇʀᴏᴋᴜ 」─
+</h3>
 
-## Features
-- `/start` with a start image (set `START_IMAGE`)
-- `/help`
-- Local authorization: `/auth`, `/unauth`, `/authusers`, `/clearauthusers`
-- Global authorization: `/gauth`, `/gunauth`, `/gusers`, `/cleargusers`
-- `/adminedit on|off` — controls deletion of admin/owner edits
-- `/stats`
-- SQLite database; no MongoDB required
-- Inline Help/Status buttons
-- FloodWait/RPCError handling
-- Works with Pyrogram 2.x
+<p align="center"><a href="https://dashboard.heroku.com/new?template=https://github.com/opk00637-glitch/Kriti-"> <img src="https://www.herokucdn.com/deploy/button.svg"></a></p>
 
-## Setup
-1. Install Python 3.10+.
-2. `pip install -r requirements.txt`
-3. Set environment variables from `.env.example`.
-4. Run: `python bot.py`
+<br />
 
-## Telegram permissions
-Add the bot to your group and make it an administrator with **Delete Messages** permission.
+---
 
-## Important behavior
-- `/adminedit on` deletes edited messages from admins/owners as well as normal members.
-- `/adminedit off` ignores edits made by admins/owners but still deletes edited messages from normal members.
-- Authorized local/global users are exempt from edit deletion.
-- Default is OFF for admin edits, matching the reference help screen.
+### 🔧 Quick Setup
 
-For username targets, use `/auth @username`; for the most reliable method, reply to the user's message and send `/auth`.
+1. **Upgrade & Update:**
+   ```bash
+   sudo apt-get update && sudo apt-get upgrade -y
+   ```
+
+2. **Install Required Packages:**
+   ```bash
+   sudo apt-get install python3-pip ffmpeg -y
+   ```
+3. **Setting up PIP**
+   ```bash
+   sudo pip3 install -U pip
+   ```
+4. **Installing Node**
+   ```bash
+   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash && source ~/.bashrc && nvm install v18
+   ```
+5. **Clone the Repository**
+   ```bash
+   git clone https://github.com/Badnam019/KRITIMUSIC && cd KRITIMUSIC
+   ```
+6. **Install Requirements**
+   ```bash
+   pip3 install -U -r requirements.txt
+   ```
+7. **Create .env  with sample.env**
+   ```bash
+   cp sample.env .env
+   ```
+   - Edit .env with your vars
+8. **Editing Vars:**
+   ```bash
+   vi .env
+   ```
+   - Edit .env with your values.
+   - Press `I` button on keyboard to start editing.
+   - Press `Ctrl + C`  once you are done with editing vars and type `:wq` to save .env or `:qa` to exit editing.
+9. **Installing tmux**
+    ```bash
+    sudo apt install tmux -y && tmux
+    ```
+10. **Run the Bot**
+    ```bash
+    bash start
+    ```
+
+---
